@@ -21,7 +21,7 @@ echo "installing to $loop"
 
 podman run --rm --privileged --pid=host --security-opt label=disable \
   -v /dev:/dev -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "$img" bootc install to-disk --wipe --filesystem xfs --bootloader grub \
+  "$img" bootc install to-disk --wipe --filesystem xfs --generic-image \
     --karg=console=tty0 --karg=console=hvc0 \
     --source-imgref "containers-storage:$img" \
     --target-transport containers-storage --target-imgref "$img" "$loop"

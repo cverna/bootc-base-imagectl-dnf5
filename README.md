@@ -106,7 +106,9 @@ sanity cases in `tests/rootfs/cases`, several ported from
 - security: `setuid-allowlist`, `file-permissions`
 
 `just disk-test` (needs root) installs the image to a loop device with
-`bootc install to-disk` and validates the resulting deployment: ESP + root
+`bootc install to-disk --generic-image` (installs all bootloader types
+and skips system-firmware changes, so it works on CI runners) and validates
+the resulting deployment: ESP + root
 partitions, `/usr/lib/modules/*/initramfs.img`, the BLS entry's `initrd`,
 the rpmdb layout, and (when the host enforces SELinux) the on-disk file
 contexts.
