@@ -44,15 +44,18 @@ for _ in $(seq 1 10); do
 done
 lsblk -f "$loop"
 
+# Locate the root filesystem (partition layout differs per architecture:
+# x86_64 with --generic-image has BIOS boot + ESP + root; arm64 has ESP + root).
+esp=$(lsblk -ln -o NAME,FSTYPE "$loop" | awk '$2=="vfat"{print "/dev/"$1; exit}')
+rootpart=$(lsblk -ln -o NAME,FSTYPE "$loop" | awk '$2=="xfs"{print "/dev/"$1; exit}')
+[ -n "$esp" ] || { echo "no ESP partition found" >&2; exit 1; }
+[ -n "$rootpart" ] || { echo "no root (xfs) partition found" >&2; exit 1; }
+
 mkdir -p "$mnt"
-mount -o ro "${loop}p2" "$mnt"
+mount -o ro "$rootpart" "$mnt"
 
 commit=$(ls "$mnt/ostree/deploy/default/deploy" | grep -v origin | head -1)
 root="$mnt/ostree/deploy/default/deploy/$commit"
-
-# ESP + root partitions exist
-test -b "${loop}p1"
-test -b "${loop}p2"
 
 # Deployment content
 test -f "$root"/usr/lib/modules/*/initramfs.img
@@ -60,7 +63,9 @@ test -f "$root/usr/share/rpm/rpmdb.sqlite"
 [ "$(readlink "$root/usr/lib/sysimage/rpm")" = "../../share/rpm" ]
 
 # Bootloader entry points at an initrd
-grep -q '^initrd ' "$mnt"/boot/loader/entries/*.conf
+bls=$(find "$mnt/boot" -path '*entries*' -name '*.conf' | head -1)
+[ -n "$bls" ] || { echo "no BLS entry found" >&2; exit 1; }
+grep -q '^initrd ' "$bls"
 
 # SELinux labels are applied at install time; only checkable when the host
 # enforces SELinux.
