@@ -1,0 +1,4 @@
+#!/bin/bash
+set -xeuo pipefail
+# A repo configuration directory must be present for dnf
+test -d usr/share/dnf5/repos.d || test -d etc/yum.repos.d

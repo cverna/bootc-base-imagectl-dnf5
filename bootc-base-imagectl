@@ -118,6 +118,14 @@ def rootfs_glue(target, manifest, no_initramfs):
     else:
         bwrap_run(target, ["/usr/bin/systemd-sysusers"])
 
+    # Neutralize systemd-firstboot, as the base-images manifests do via
+    # `remove-from-packages`; otherwise it would run on first boot.
+    for link in ("usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service",
+                 "etc/systemd/system/sysinit.target.wants/systemd-firstboot.service"):
+        path = os.path.join(target, link)
+        if os.path.lexists(path):
+            os.remove(path)
+
     # Apply preset enablement (the same unit links a booted system expects).
     log("Applying systemd presets")
     r = bwrap_run(target, ["/usr/bin/systemctl", "preset-all"])

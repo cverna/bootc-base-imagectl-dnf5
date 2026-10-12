@@ -94,21 +94,26 @@ Known upstream issues observed while booting:
 `just lint` runs `bootc container lint` against the image.
 
 `just test` builds a container *from* the image and runs the read-only rootfs
-sanity cases in `tests/rootfs/cases` (ported from
-[fedora/bootc/base-images]). They cover:
+sanity cases in `tests/rootfs/cases`, several ported from
+[fedora-coreos-config] and [fedora/bootc/base-images]:
 
-- `fedora-only`, `root-mode`
-- rpmdb: no `rpmdb.sqlite-shm`, and the `/usr/share/rpm` + symlink layout
-- `/var` glue (`/var/run`, `/var/tmp`, `/var/lib/rpm-state`)
-- `bootupd` metadata lists grub2 + shim
-- `initramfs` present for every kernel
-- `boot-empty` (the gpt-auto/`/efi` parity fix)
-- `ostree-layout` (`/sysroot`, `/ostree` link, composefs config)
-- `nsswitch-inline` (post-altfiles users in `/etc`)
-- `etc-group`, `no-iptables-legacy`
+- `fedora-only`, `root-mode`, `etc-group`, `users-groups`, `no-iptables-legacy`
+- account databases: `etc-permissions`, `gshadow` (parser regression)
+- rpmdb: `rpmdb`, `rpmdb-sqlite`, `rpmdb-layout`
+- boot/ostree: `initramfs`, `boot-empty`, `bootupd`, `ostree-layout`
+- system: `systemd-firstboot`, `var`, `yum-repo-dir`, `check-symlink`,
+  `nsswitch-inline`
+- security: `setuid-allowlist`, `file-permissions`
 
-CI runs both `lint` and the rootfs tests on each architecture.
+`just disk-test` (needs root) installs the image to a loop device with
+`bootc install to-disk` and validates the resulting deployment: ESP + root
+partitions, `/usr/lib/modules/*/initramfs.img`, the BLS entry's `initrd`,
+the rpmdb layout, and (when the host enforces SELinux) the on-disk file
+contexts.
 
+CI runs `lint`, the rootfs tests, and the disk test on each architecture.
+
+[fedora-coreos-config]: https://github.com/coreos/fedora-coreos-config/tree/main/tests/kola
 [fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
 
 ## CI

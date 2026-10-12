@@ -1,0 +1,4 @@
+#!/bin/bash
+set -xeuo pipefail
+# Verify the sqlite rpmdb backend, at the classic /usr/share/rpm path.
+test -f usr/share/rpm/rpmdb.sqlite

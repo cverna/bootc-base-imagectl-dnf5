@@ -1,0 +1,8 @@
+#!/bin/bash
+set -xeuo pipefail
+# Verify the /etc release symlinks are valid (from
+# fedora-coreos-config tests/kola/files/check-symlink).
+for f in etc/system-release-cpe etc/system-release etc/redhat-release etc/os-release; do
+  real=$(readlink -f "$f")
+  test -f "$real"
+done

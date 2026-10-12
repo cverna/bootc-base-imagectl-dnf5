@@ -1,0 +1,16 @@
+#!/bin/bash
+set -xeuo pipefail
+# Verify ownership and mode of the account databases (ported from
+# fedora-coreos-config tests/kola/files/etc-permissions).
+incorrect=""
+for f in etc/passwd etc/group; do
+  [ "$(stat --format='%a %u %g' "$f")" = "644 0 0" ] || incorrect+=" /$f"
+done
+for f in etc/shadow etc/gshadow; do
+  [ "$(stat --format='%a %u %g' "$f")" = "0 0 0" ] || incorrect+=" /$f"
+done
+if [ -n "$incorrect" ]; then
+  ls -al $incorrect
+  echo "incorrect permissions:$incorrect" >&2
+  exit 1
+fi

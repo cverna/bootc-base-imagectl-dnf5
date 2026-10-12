@@ -27,6 +27,17 @@ test: build
     {{builder}} build --from {{image}} -f tests/rootfs/Dockerfile \
         -t {{image}}-test tests/rootfs
 
+# Install to a loop device and validate the deployment (needs root).
+[group('disk')]
+disk-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The image is in the user's (rootless) storage; the test runs as root.
+    {{builder}} save --format=oci-archive -o /var/tmp/{{replace(image, "/", "-")}}-test.oci.tar {{image}}
+    sudo {{builder}} load -i /var/tmp/{{replace(image, "/", "-")}}-test.oci.tar
+    rm -f /var/tmp/{{replace(image, "/", "-")}}-test.oci.tar
+    sudo tests/disk/run {{image}}
+
 # Prove the image installs to a disk and produce raw + qcow2 artifacts.
 # Needs root (block device access) and a free loop device.
 [group('disk')]

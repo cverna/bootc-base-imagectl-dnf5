@@ -1,0 +1,6 @@
+#!/bin/bash
+set -xeuo pipefail
+# systemd-firstboot must be neutralized (no enablement link), like the
+# base-images manifests arrange via remove-from-packages.
+test '!' -e usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service
+test '!' -e etc/systemd/system/sysinit.target.wants/systemd-firstboot.service

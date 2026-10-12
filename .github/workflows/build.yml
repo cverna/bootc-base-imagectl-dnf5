@@ -65,6 +65,11 @@ jobs:
             -f tests/rootfs/Dockerfile \
             -t "${IMAGE}:test-${{ matrix.arch }}" tests/rootfs
 
+      - name: Disk install test
+        run: |
+          set -euxo pipefail
+          sudo tests/disk/run "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}"
+
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
         run: |

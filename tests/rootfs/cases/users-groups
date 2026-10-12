@@ -1,0 +1,10 @@
+#!/bin/bash
+set -xeuo pipefail
+# Deterministic system accounts (subset with stable IDs)
+[ "$(getent passwd root | cut -d: -f3)" = 0 ]
+[ "$(getent passwd nobody | cut -d: -f3)" = 65534 ]
+[ "$(getent passwd tss | cut -d: -f3)" = 59 ]
+for g in wheel:10 adm:4 kvm:36 tss:59 systemd-journal:190; do
+  name=${g%:*}; gid=${g#*:}
+  [ "$(getent group "$name" | cut -d: -f3)" = "$gid" ]
+done

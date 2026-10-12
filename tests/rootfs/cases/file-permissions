@@ -1,0 +1,5 @@
+#!/bin/bash
+set -xeuo pipefail
+# No setgid files and no world-writable files outside the tmp dirs.
+test -z "$(find / -xdev -type f -perm -2000 2>/dev/null)"
+test -z "$(find / -xdev -type f -perm -0002 ! -path '/var/tmp/*' ! -path '/tmp/*' 2>/dev/null)"
