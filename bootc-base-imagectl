@@ -192,7 +192,7 @@ def generate_initramfs(target):
         bwrap_run(target, ["/usr/bin/dracut", "--reproducible", "--add", "ostree",
                            "--no-hostonly", "-f",
                            f"/usr/lib/modules/{kver}/initramfs.img",
-                           "--kver", kver])
+                           "--kver", kver], check=True)
 
 
 def rpmdb_target_layout(target):
