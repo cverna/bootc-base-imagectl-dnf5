@@ -26,7 +26,11 @@ disk name="dnf5-bootc":
     #!/usr/bin/env bash
     set -euo pipefail
     out="/var/tmp/{{name}}.raw"
-    rm -f "$out"
+    # The image is built in the user's (rootless) storage; the install runs
+    # as root, so copy it into root's storage first.
+    {{builder}} save --format=oci-archive -o "/var/tmp/{{name}}.oci.tar" {{image}}
+    sudo {{builder}} load -i "/var/tmp/{{name}}.oci.tar"
+    rm -f "/var/tmp/{{name}}.oci.tar" "$out"
     truncate -s 8G "$out"
     loop=$(sudo losetup -P --find --show "$out")
     trap 'sudo losetup -D' EXIT
