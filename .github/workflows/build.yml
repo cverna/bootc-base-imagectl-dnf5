@@ -19,15 +19,21 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # Build each architecture separately. QEMU emulation lets an amd64 runner
-  # build the arm64 image: with `podman build --arch`, the builder container
-  # itself runs the target architecture, so no cross-compose logic is needed.
+  # Build each architecture on a native runner. QEMU emulation is *not*
+  # usable here: the compose runs package tooling through bubblewrap, and
+  # bwrap cannot create namespaces under qemu-user ("Creating new namespace
+  # failed: Invalid argument"). See the same limitation in
+  # https://gitlab.com/fedora/bootc/base-images/-/issues/57
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -39,9 +45,6 @@ jobs:
           fi
           podman --version
 
-      - name: Set up QEMU (arm64 emulation)
-        uses: docker/setup-qemu-action@v3
-
       - name: Build ${{ matrix.arch }} image
         run: |
           set -euxo pipefail
@@ -51,9 +54,8 @@ jobs:
             --build-arg=IMAGE_VERSION="${GITHUB_REF_NAME}" \
             -t "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" .
 
-      - name: Lint (native arch only)
-        if: matrix.arch == 'amd64'
-        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:${GITHUB_SHA::12}-amd64" container lint
+      - name: Lint image
+        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" container lint
 
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
@@ -86,13 +88,11 @@ jobs:
         run: |
           set -euxo pipefail
           sha="${GITHUB_SHA::12}"
-          for tag in "$sha"; do
-            sudo podman manifest create "${IMAGE}:${tag}"
-            for arch in amd64 arm64; do
-              sudo podman manifest add "${IMAGE}:${tag}" "docker://${IMAGE}:${tag}-${arch}"
-            done
-            sudo podman manifest push --all "${IMAGE}:${tag}"
+          sudo podman manifest create "${IMAGE}:${sha}"
+          for arch in amd64 arm64; do
+            sudo podman manifest add "${IMAGE}:${sha}" "docker://${IMAGE}:${sha}-${arch}"
           done
+          sudo podman manifest push --all "${IMAGE}:${sha}"
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
             sudo podman manifest create "${IMAGE}:latest"
             for arch in amd64 arm64; do

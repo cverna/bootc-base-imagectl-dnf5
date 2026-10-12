@@ -27,6 +27,21 @@ ARCH = os.uname().machine
 BWRAP = shutil.which("bwrap")
 
 
+def require_bwrap():
+    """bwrap is used to run package tooling against the target rootfs. Under
+    QEMU user emulation (e.g. building arm64 on an amd64 runner) bwrap cannot
+    create namespaces, so fail early and clearly instead of producing a broken
+    image."""
+    if not BWRAP:
+        return
+    probe = subprocess.run([BWRAP, "--ro-bind", "/", "/", "true"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if probe.returncode != 0:
+        sys.exit(f"error: bwrap is not usable here ({probe.stderr.strip()}); "
+                 "emulated builds are not supported, use a native builder for the "
+                 "target architecture")
+
+
 def log(msg):
     print(f"==> {msg}", flush=True)
 
@@ -105,7 +120,9 @@ def rootfs_glue(target, manifest, no_initramfs):
 
     # Apply preset enablement (the same unit links a booted system expects).
     log("Applying systemd presets")
-    bwrap_run(target, ["/usr/bin/systemctl", "preset-all"], check=False)
+    r = bwrap_run(target, ["/usr/bin/systemctl", "preset-all"])
+    if r.returncode != 0:
+        print(f"warning: systemctl preset-all failed (rc={r.returncode})")
 
     # Runtime compatibility glue.
     os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
@@ -155,8 +172,9 @@ def rootfs_glue(target, manifest, no_initramfs):
 
     # Generate bootupd update metadata (used by bootc install / updates).
     log("Generating bootloader update metadata")
-    bwrap_run(target, ["/usr/bin/bootupctl", "backend", "generate-update-metadata"],
-              check=False)
+    r = bwrap_run(target, ["/usr/bin/bootupctl", "backend", "generate-update-metadata"])
+    if r.returncode != 0:
+        print(f"warning: bootupctl metadata generation failed (rc={r.returncode})")
 
     if not no_initramfs:
         generate_initramfs(target)
@@ -244,6 +262,7 @@ def build_rootfs(args):
         shutil.rmtree(target)
     os.makedirs(target)
 
+    require_bwrap()
     configure_dnf(target, args.repos_from)
 
     argv = ["dnf5", "install", "-y", f"--installroot={target}"]

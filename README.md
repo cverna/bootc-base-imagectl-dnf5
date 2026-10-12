@@ -95,6 +95,35 @@ MIT. See [LICENSE](LICENSE).
 
 ## CI
 
+`.github/workflows/build.yml` builds the image for **amd64 and arm64** on
+native runners (`ubuntu-latest` / `ubuntu-24.04-arm`), runs
+`bootc container lint`, and on pushes to `main` (and tags) publishes to GHCR:
+
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:latest          # multi-arch manifest
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>     # multi-arch manifest
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-amd64     # per-arch
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64
+
+Notes:
+
+- **QEMU emulation does not work for this compose.** It runs package tooling
+  through `bubblewrap`, and `bwrap` cannot create namespaces under qemu-user
+  (`Creating new namespace failed: Invalid argument`), so arm64 is built on a
+  native arm64 runner. The script detects an unusable `bwrap` and fails early
+  rather than producing a broken image. (Same limitation as
+  <https://gitlab.com/fedora/bootc/base-images/-/issues/57>.)
+- GHCR packages created from a workflow token are **private by default**;
+  change the package visibility in the repository/package settings if you
+  want it public.
+- Disk creation and boot tests need loop devices/KVM and are intentionally
+  not part of CI.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+## CI
+
 `.github/workflows/build.yml`:
 
 - builds the image for **amd64 and arm64** on every pull request (podman,
