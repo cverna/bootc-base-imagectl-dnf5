@@ -1,0 +1,7 @@
+#!/bin/bash
+set -xeuo pipefail
+# Post-altfiles model: users are inline in /etc, no /usr/lib/passwd split
+grep -qE '^passwd:[[:space:]]+files systemd' etc/nsswitch.conf
+grep -qE '^group:[[:space:]]+files systemd' etc/nsswitch.conf
+test '!' -e usr/lib/passwd
+test '!' -e usr/lib/group

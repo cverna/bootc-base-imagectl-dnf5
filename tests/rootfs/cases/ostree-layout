@@ -1,0 +1,6 @@
+#!/bin/bash
+set -xeuo pipefail
+test -d sysroot
+test "$(readlink ostree)" = "sysroot/ostree"
+# composefs enabled (bootc baseimage reference content)
+grep -q '^enabled = yes$' usr/lib/ostree/prepare-root.conf

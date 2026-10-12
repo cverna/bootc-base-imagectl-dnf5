@@ -1,0 +1,5 @@
+#!/bin/bash
+set -xeuo pipefail
+# /boot must be empty in the image: a non-empty /boot makes systemd's
+# gpt-auto-generator target /efi, which no bootc image ships.
+test -z "$(ls -A boot)"

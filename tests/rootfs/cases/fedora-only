@@ -1,0 +1,4 @@
+#!/bin/bash
+set -xeuo pipefail
+. /usr/lib/os-release
+test "${ID}" = fedora

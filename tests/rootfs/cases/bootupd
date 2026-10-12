@@ -1,0 +1,4 @@
+#!/bin/bash
+set -xeuo pipefail
+# Verify the bootupd metadata lists both grub2 and shim components
+grep -q 'grub2-.*,shim-' /usr/lib/bootupd/updates/EFI.json

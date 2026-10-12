@@ -57,6 +57,14 @@ jobs:
       - name: Lint image
         run: sudo podman run --rm --entrypoint bootc "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" container lint
 
+      - name: Rootfs tests
+        run: |
+          set -euxo pipefail
+          sudo podman build --arch=${{ matrix.arch }} \
+            --from "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" \
+            -f tests/rootfs/Dockerfile \
+            -t "${IMAGE}:test-${{ matrix.arch }}" tests/rootfs
+
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
         run: |

@@ -1,0 +1,6 @@
+#!/bin/bash
+set -xeuo pipefail
+# Directories and glue we expect to exist
+test -d var/tmp
+test -d var/lib/rpm-state
+test "$(readlink var/run)" = "../run"

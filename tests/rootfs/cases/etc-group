@@ -1,0 +1,7 @@
+#!/bin/bash
+set -xeuo pipefail
+# System groups are resolvable and live in /etc (inline/post-altfiles model)
+for grp in kvm tss systemd-journal; do
+  getent group $grp >/dev/null
+  grep -q "^$grp:" /etc/group
+done

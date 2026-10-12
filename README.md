@@ -89,6 +89,28 @@ Known upstream issues observed while booting:
 
 [fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
 
+## Tests
+
+`just lint` runs `bootc container lint` against the image.
+
+`just test` builds a container *from* the image and runs the read-only rootfs
+sanity cases in `tests/rootfs/cases` (ported from
+[fedora/bootc/base-images]). They cover:
+
+- `fedora-only`, `root-mode`
+- rpmdb: no `rpmdb.sqlite-shm`, and the `/usr/share/rpm` + symlink layout
+- `/var` glue (`/var/run`, `/var/tmp`, `/var/lib/rpm-state`)
+- `bootupd` metadata lists grub2 + shim
+- `initramfs` present for every kernel
+- `boot-empty` (the gpt-auto/`/efi` parity fix)
+- `ostree-layout` (`/sysroot`, `/ostree` link, composefs config)
+- `nsswitch-inline` (post-altfiles users in `/etc`)
+- `etc-group`, `no-iptables-legacy`
+
+CI runs both `lint` and the rootfs tests on each architecture.
+
+[fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
+
 ## CI
 
 `.github/workflows/build.yml` builds the image for **amd64 and arm64** on

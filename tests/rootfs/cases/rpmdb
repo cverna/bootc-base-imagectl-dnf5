@@ -1,0 +1,8 @@
+#!/bin/bash
+set -xeuo pipefail
+# No unreproducible sqlite -shm in the image
+for d in usr/share/rpm usr/lib/sysimage/rpm; do
+  if test -d "$d"; then
+    test '!' -f "$d/rpmdb.sqlite-shm"
+  fi
+done

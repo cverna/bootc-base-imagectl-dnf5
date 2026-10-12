@@ -1,0 +1,8 @@
+#!/bin/bash
+set -xeuo pipefail
+# rpm-ostree-compatible layout: real db at /usr/share/rpm, compat symlinks,
+# and the explicit %_dbpath macro.
+test -f usr/share/rpm/rpmdb.sqlite
+test "$(readlink usr/lib/sysimage/rpm)" = "../../share/rpm"
+test "$(readlink var/lib/rpm)" = "../../usr/share/rpm"
+grep -q '^%_dbpath /usr/share/rpm$' usr/lib/rpm/macros.d/macros.rpm-ostree

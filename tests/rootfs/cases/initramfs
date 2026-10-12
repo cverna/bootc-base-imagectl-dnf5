@@ -1,0 +1,6 @@
+#!/bin/bash
+set -xeuo pipefail
+# Every installed kernel must have an initramfs
+for kdir in usr/lib/modules/*/; do
+  test -f "$kdir/initramfs.img"
+done

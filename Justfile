@@ -17,8 +17,15 @@ build:
 
 # Run the bootc container linter against the built image.
 [group('core')]
-test:
+lint:
     {{builder}} run --rm --entrypoint bootc {{image}} container lint
+
+# Rootfs sanity tests: build a test container from the image; the cases in
+# tests/rootfs/cases run at build time against the image under test.
+[group('core')]
+test: build
+    {{builder}} build --from {{image}} -f tests/rootfs/Dockerfile \
+        -t {{image}}-test tests/rootfs
 
 # Prove the image installs to a disk and produce raw + qcow2 artifacts.
 # Needs root (block device access) and a free loop device.
