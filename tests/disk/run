@@ -6,13 +6,22 @@ img=${1:?usage: run <image-ref>}
 work=$(mktemp -d)
 loop=""
 mnt="$work/mnt"
+install_log="$work/install.log"
 cleanup() {
   set +e
   mountpoint -q "$mnt" && umount "$mnt"
   [ -n "$loop" ] && losetup -D "$loop"
   rm -rf "$work"
 }
+diag() {
+  set +e
+  echo "===== diagnostics ====="
+  [ -n "$loop" ] && { lsblk -f "$loop"; blkid; }
+  echo "===== install log (tail) ====="
+  tail -50 "$install_log" 2>/dev/null
+}
 trap cleanup EXIT
+trap diag ERR
 
 disk="$work/disk.raw"
 truncate -s 8G "$disk"
@@ -24,7 +33,16 @@ podman run --rm --privileged --pid=host --security-opt label=disable \
   "$img" bootc install to-disk --wipe --filesystem xfs --generic-image \
     --karg=console=tty0 --karg=console=hvc0 \
     --source-imgref "containers-storage:$img" \
-    --target-transport containers-storage --target-imgref "$img" "$loop"
+    --target-transport containers-storage --target-imgref "$img" "$loop" 2>&1 | tee "$install_log"
+
+# Wait for the partition nodes to appear before mounting.
+partprobe "$loop" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+for _ in $(seq 1 10); do
+  [ -b "${loop}p2" ] && break
+  sleep 1
+done
+lsblk -f "$loop"
 
 mkdir -p "$mnt"
 mount -o ro "${loop}p2" "$mnt"
