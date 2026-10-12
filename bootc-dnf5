@@ -127,6 +127,15 @@ def rootfs_glue(target, manifest, no_initramfs):
     if not os.path.lexists(ostree_link):
         os.symlink("sysroot/ostree", ostree_link)
 
+    # Enable composefs (bootc's baseimage reference content); without it the
+    # linter warns and deployments skip composefs.
+    ostree_dir = os.path.join(target, "usr/lib/ostree")
+    os.makedirs(ostree_dir, exist_ok=True)
+    prepare_root = os.path.join(ostree_dir, "prepare-root.conf")
+    if not os.path.exists(prepare_root):
+        with open(prepare_root, "w") as f:
+            f.write("[composefs]\nenabled = yes\n[sysroot]\nreadonly = true\n")
+
     # Keep /boot empty and stage EFI binaries under /usr/lib/ostree-boot,
     # like rpm-ostree. A non-empty /boot makes systemd's gpt-auto-generator
     # target /efi (which no bootc image ships).
