@@ -88,3 +88,7 @@ Known upstream issues observed while booting:
   rpm-ostree-built minimal image too).
 
 [fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
+
+## License
+
+MIT. See [LICENSE](LICENSE).
