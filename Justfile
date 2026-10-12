@@ -1,8 +1,8 @@
-# Development entry point for the dnf5-bootc proof of concept.
+# Development entry point for the bootc-base-imagectl-dnf5 proof of concept.
 # Run `just --list` for the available targets.
 
 builder := env("BUILDER", "podman")
-image := "localhost/dnf5-bootc"
+image := "localhost/bootc-base-imagectl-dnf5"
 # Required for the nested containerization (bwrap) the compose uses.
 priv := "--security-opt=label=disable --cap-add=all"
 version := env("IMAGE_VERSION", "devel")
@@ -22,7 +22,7 @@ test:
 # Prove the image installs to a disk and produce raw + qcow2 artifacts.
 # Needs root (block device access) and a free loop device.
 [group('disk')]
-disk name="dnf5-bootc":
+disk name="bootc-base-imagectl-dnf5":
     #!/usr/bin/env bash
     set -euo pipefail
     out="/var/tmp/{{name}}.raw"

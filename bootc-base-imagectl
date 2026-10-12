@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compose a bootable container image rootfs with dnf5 (no rpm-ostree).
+"""bootc-base-imagectl (dnf5): compose a bootc rootfs with dnf5, no rpm-ostree.
 
 Minimal proof of concept for replacing `rpm-ostree compose rootfs` with
 `dnf5 --installroot` plus the small amount of glue that a bootc image needs.
@@ -8,7 +8,7 @@ rootfs layout with /usr/share/rpm, an empty /boot, boot artifacts staged in
 /usr/lib/ostree-boot, and a generated initramfs.
 
 Usage:
-    bootc-dnf5 build-rootfs MANIFEST TARGET [--repos-from DIR] [--no-initramfs]
+    bootc-base-imagectl build-rootfs MANIFEST TARGET [--repos-from DIR] [--no-initramfs]
 
 The MANIFEST is JSON (see manifest.json). TARGET must not exist; it is
 created and populated with the rootfs.
@@ -267,7 +267,7 @@ def build_rootfs(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = argparse.ArgumentParser(prog="bootc-base-imagectl", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("build-rootfs", help="compose a rootfs into TARGET")

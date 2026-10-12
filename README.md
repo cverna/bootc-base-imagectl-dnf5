@@ -1,4 +1,4 @@
-# dnf5-bootc
+# bootc-base-imagectl-dnf5
 
 A minimal proof of concept for building **Fedora bootc base images with
 `dnf5` instead of `rpm-ostree`**.
@@ -14,7 +14,7 @@ This is intentionally **dnf5-only**: there is no rpm-ostree code path.
 
 ## How it works
 
-`bootc-dnf5 build-rootfs manifest.json TARGET`:
+`bootc-base-imagectl build-rootfs manifest.json TARGET`:
 
 1. seeds the installroot's dnf config (repos, GPG keys, `releasever`) from a
    source root, since `dnf5 --installroot` reads its configuration from the
@@ -43,7 +43,7 @@ reproducing the legacy `/usr/lib/passwd` split.
 ## Usage
 
 ```bash
-just build                  # podman build -> localhost/dnf5-bootc
+just build                  # podman build -> localhost/bootc-base-imagectl-dnf5
 just test                   # bootc container lint
 just disk                   # bootc install to a loop device -> raw + qcow2 (root)
 ```
@@ -57,7 +57,7 @@ just disk                   # bootc install to a loop device -> raw + qcow2 (roo
 just disk
 vfkit --cpus 4 --memory 4096 \
   --bootloader efi,variable-store=efi.fd,create \
-  --device virtio-blk,path=/var/tmp/dnf5-bootc.raw \
+  --device virtio-blk,path=/var/tmp/bootc-base-imagectl-dnf5.raw \
   --device virtio-net,nat --device virtio-rng \
   --device virtio-serial,stdio
 ```
