@@ -89,28 +89,24 @@ Known upstream issues observed while booting:
 
 [fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
 
-## License
-
-MIT. See [LICENSE](LICENSE).
-
 ## CI
 
 `.github/workflows/build.yml` builds the image for **amd64 and arm64** on
-native runners (`ubuntu-latest` / `ubuntu-24.04-arm`), runs
+native GitHub-hosted runners (`ubuntu-latest` and `ubuntu-24.04-arm`), runs
 `bootc container lint`, and on pushes to `main` (and tags) publishes to GHCR:
 
     ghcr.io/cverna/bootc-base-imagectl-dnf5:latest          # multi-arch manifest
     ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>     # multi-arch manifest
     ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-amd64     # per-arch
-    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64     # per-arch
 
 Notes:
 
-- **QEMU emulation does not work for this compose.** It runs package tooling
-  through `bubblewrap`, and `bwrap` cannot create namespaces under qemu-user
-  (`Creating new namespace failed: Invalid argument`), so arm64 is built on a
-  native arm64 runner. The script detects an unusable `bwrap` and fails early
-  rather than producing a broken image. (Same limitation as
+- arm64 is built on a **native arm64 runner**, not with QEMU emulation: the
+  compose runs package tooling through `bubblewrap`, and `bwrap` cannot
+  create namespaces under qemu-user (`Creating new namespace failed:
+  Invalid argument`). `bootc-base-imagectl` detects an unusable `bwrap` and
+  fails early rather than producing a broken image. (Same limitation as
   <https://gitlab.com/fedora/bootc/base-images/-/issues/57>.)
 - GHCR packages created from a workflow token are **private by default**;
   change the package visibility in the repository/package settings if you
@@ -121,38 +117,3 @@ Notes:
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## CI
-
-`.github/workflows/build.yml`:
-
-- builds the image for **amd64 and arm64** on every pull request (podman,
-  with the nested-container privileges the compose needs);
-- uses `docker/setup-qemu-action` so the amd64 runner can build the arm64
-  image: with `podman build --arch=arm64` the *builder container itself*
-  runs arm64 under QEMU, so `uname -m` (and therefore the per-arch
-  `grub2-efi`/`shim` selection in the manifest) is correct without any
-  cross-compose logic;
-- runs `bootc container lint` on the native build;
-- on pushes to `main` (and tags), pushes the per-arch images and a
-  multi-arch manifest to GHCR:
-
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:latest          # multi-arch manifest
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>     # multi-arch manifest
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-amd64     # per-arch
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64
-
-Notes:
-
-- Emulated arm64 builds are considerably slower than native ones.
-- GHCR packages created from a workflow token are **private by default**;
-  change the package visibility in the repository/package settings if you
-  want it public.
-- Disk creation and boot tests need loop devices/KVM and are intentionally
-  not part of CI.
-
-To build an emulated image locally:
-
-```bash
-ARCH=x86_64 just build     # from an arm64 host, or ARCH=arm64 from amd64
-```

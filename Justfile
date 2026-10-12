@@ -6,15 +6,13 @@ image := "localhost/bootc-base-imagectl-dnf5"
 # Required for the nested containerization (bwrap) the compose uses.
 priv := "--security-opt=label=disable --cap-add=all"
 version := env("IMAGE_VERSION", "devel")
-# Target architecture for emulated/cross builds (e.g. arm64, amd64)
-arch := env("ARCH", "")
 
 default: build
 
 # Build the bootc image using dnf5 (no rpm-ostree anywhere).
 [group('core')]
 build:
-    {{builder}} build {{priv}} {{if arch != "" { "--arch=" + arch } else { "" }}} \
+    {{builder}} build {{priv}} \
         --build-arg=IMAGE_VERSION={{version}} -t {{image}} .
 
 # Run the bootc container linter against the built image.
