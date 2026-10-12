@@ -97,21 +97,33 @@ MIT. See [LICENSE](LICENSE).
 
 `.github/workflows/build.yml`:
 
-- builds the image on every pull request (podman, with the nested-container
-  privileges the compose needs);
-- runs `bootc container lint` against the result;
-- on pushes to `main` (and tags), publishes to GHCR:
+- builds the image for **amd64 and arm64** on every pull request (podman,
+  with the nested-container privileges the compose needs);
+- uses `docker/setup-qemu-action` so the amd64 runner can build the arm64
+  image: with `podman build --arch=arm64` the *builder container itself*
+  runs arm64 under QEMU, so `uname -m` (and therefore the per-arch
+  `grub2-efi`/`shim` selection in the manifest) is correct without any
+  cross-compose logic;
+- runs `bootc container lint` on the native build;
+- on pushes to `main` (and tags), pushes the per-arch images and a
+  multi-arch manifest to GHCR:
 
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:latest
-      ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:latest          # multi-arch manifest
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>     # multi-arch manifest
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-amd64     # per-arch
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64
 
 Notes:
 
-- CI builds for the runner's architecture (`x86_64`). Building `aarch64`
-  would need an arm64 runner; the manifest already selects the right
-  `grub2-efi`/`shim` packages per architecture.
+- Emulated arm64 builds are considerably slower than native ones.
 - GHCR packages created from a workflow token are **private by default**;
   change the package visibility in the repository/package settings if you
   want it public.
 - Disk creation and boot tests need loop devices/KVM and are intentionally
   not part of CI.
+
+To build an emulated image locally:
+
+```bash
+ARCH=x86_64 just build     # from an arm64 host, or ARCH=arm64 from amd64
+```

@@ -19,13 +19,18 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  # Build each architecture separately. QEMU emulation lets an amd64 runner
+  # build the arm64 image: with `podman build --arch`, the builder container
+  # itself runs the target architecture, so no cross-compose logic is needed.
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
 
-      # podman (not docker) is required: the compose uses nested
-      # containerization and needs --cap-add=all --security-opt=label=disable.
       - name: Ensure podman is available
         run: |
           if ! command -v podman >/dev/null; then
@@ -34,25 +39,64 @@ jobs:
           fi
           podman --version
 
-      - name: Build image
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build ${{ matrix.arch }} image
         run: |
           set -euxo pipefail
           sudo podman build \
+            --arch=${{ matrix.arch }} \
             --security-opt=label=disable --cap-add=all \
             --build-arg=IMAGE_VERSION="${GITHUB_REF_NAME}" \
-            -t "${IMAGE}:${GITHUB_SHA::12}" \
-            -t "${IMAGE}:latest" .
+            -t "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" .
 
-      - name: Lint image
-        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:latest" container lint
+      - name: Lint (native arch only)
+        if: matrix.arch == 'amd64'
+        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:${GITHUB_SHA::12}-amd64" container lint
 
-      - name: Push to GHCR
+      - name: Push arch image to GHCR
         if: github.event_name == 'push'
         run: |
           set -euxo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          sudo podman push "${IMAGE}:${GITHUB_SHA::12}"
+          sudo podman push "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}"
+
+  # Assemble and push the multi-arch manifest from the per-arch images.
+  manifest:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure podman is available
+        run: |
+          if ! command -v podman >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          podman --version
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Create and push manifest
+        run: |
+          set -euxo pipefail
+          sha="${GITHUB_SHA::12}"
+          for tag in "$sha"; do
+            sudo podman manifest create "${IMAGE}:${tag}"
+            for arch in amd64 arm64; do
+              sudo podman manifest add "${IMAGE}:${tag}" "docker://${IMAGE}:${tag}-${arch}"
+            done
+            sudo podman manifest push --all "${IMAGE}:${tag}"
+          done
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            sudo podman push "${IMAGE}:latest"
+            sudo podman manifest create "${IMAGE}:latest"
+            for arch in amd64 arm64; do
+              sudo podman manifest add "${IMAGE}:latest" "docker://${IMAGE}:${sha}-${arch}"
+            done
+            sudo podman manifest push --all "${IMAGE}:latest"
           fi
