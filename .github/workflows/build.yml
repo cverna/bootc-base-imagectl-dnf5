@@ -1,0 +1,58 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # podman (not docker) is required: the compose uses nested
+      # containerization and needs --cap-add=all --security-opt=label=disable.
+      - name: Ensure podman is available
+        run: |
+          if ! command -v podman >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          podman --version
+
+      - name: Build image
+        run: |
+          set -euxo pipefail
+          sudo podman build \
+            --security-opt=label=disable --cap-add=all \
+            --build-arg=IMAGE_VERSION="${GITHUB_REF_NAME}" \
+            -t "${IMAGE}:${GITHUB_SHA::12}" \
+            -t "${IMAGE}:latest" .
+
+      - name: Lint image
+        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:latest" container lint
+
+      - name: Push to GHCR
+        if: github.event_name == 'push'
+        run: |
+          set -euxo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sudo podman push "${IMAGE}:${GITHUB_SHA::12}"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            sudo podman push "${IMAGE}:latest"
+          fi

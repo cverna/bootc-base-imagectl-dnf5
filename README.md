@@ -92,3 +92,26 @@ Known upstream issues observed while booting:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## CI
+
+`.github/workflows/build.yml`:
+
+- builds the image on every pull request (podman, with the nested-container
+  privileges the compose needs);
+- runs `bootc container lint` against the result;
+- on pushes to `main` (and tags), publishes to GHCR:
+
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:latest
+      ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>
+
+Notes:
+
+- CI builds for the runner's architecture (`x86_64`). Building `aarch64`
+  would need an arm64 runner; the manifest already selects the right
+  `grub2-efi`/`shim` packages per architecture.
+- GHCR packages created from a workflow token are **private by default**;
+  change the package visibility in the repository/package settings if you
+  want it public.
+- Disk creation and boot tests need loop devices/KVM and are intentionally
+  not part of CI.
