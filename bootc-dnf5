@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Compose a bootable container image rootfs with dnf5 (no rpm-ostree).
+
+Minimal proof of concept for replacing `rpm-ostree compose rootfs` with
+`dnf5 --installroot` plus the small amount of glue that a bootc image needs.
+The result is shaped like the rpm-ostree-built Fedora images: an ostree
+rootfs layout with /usr/share/rpm, an empty /boot, boot artifacts staged in
+/usr/lib/ostree-boot, and a generated initramfs.
+
+Usage:
+    bootc-dnf5 build-rootfs MANIFEST TARGET [--repos-from DIR] [--no-initramfs]
+
+The MANIFEST is JSON (see manifest.json). TARGET must not exist; it is
+created and populated with the rootfs.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+
+ARCH = os.uname().machine
+BWRAP = shutil.which("bwrap")
+
+
+def log(msg):
+    print(f"==> {msg}", flush=True)
+
+
+def bwrap_run(root, argv, **kwargs):
+    """Run a command with `root` as '/', wiring in the system trees that
+    package scriptlets and bootupd need. Falls back to chroot."""
+    if BWRAP:
+        cmd = [BWRAP, "--bind", root, "/", "--chdir", "/",
+               "--dev", "/dev", "--proc", "/proc", "--ro-bind", "/sys", "/sys",
+               "--tmpfs", "/run", "--tmpfs", "/tmp"] + argv
+    else:
+        cmd = ["chroot", root] + argv
+    return subprocess.run(cmd, **kwargs)
+
+
+def run(argv, **kwargs):
+    subprocess.run(argv, check=True, **kwargs)
+
+
+# --------------------------------------------------------------------------
+# dnf configuration
+# --------------------------------------------------------------------------
+
+def configure_dnf(target, repos_from):
+    """dnf5 --installroot reads repos/config from the installroot, so seed
+    it from the source root (the build container by default)."""
+    for rel in ("etc/yum.repos.d",
+                "usr/share/dnf5/repos.d",
+                "etc/pki/rpm-gpg",
+                "usr/share/pki/rpm-gpg",
+                "etc/dnf/vars"):
+        src = os.path.join(repos_from, rel)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(target, rel), dirs_exist_ok=True)
+    for rel in ("usr/lib/os-release", "etc/os-release"):
+        path = os.path.join(repos_from, rel)
+        if os.path.isfile(path):
+            m = re.search(r'^VERSION_ID="?([0-9]+)', open(path).read(), re.M)
+            if m:
+                os.makedirs(os.path.join(target, "etc/dnf/vars"), exist_ok=True)
+                with open(os.path.join(target, "etc/dnf/vars/releasever"), "w") as f:
+                    f.write(m.group(1))
+                break
+
+
+def package_list(manifest):
+    items = (list(manifest.get("packages") or []) +
+             list(manifest.get(f"packages-{ARCH}") or []))
+    # allow whitespace-separated groups in one entry, like treefiles do
+    return [word for item in items for word in str(item).split()]
+
+
+def exclude_list(manifest):
+    items = (list(manifest.get("exclude-packages") or []) +
+             list(manifest.get(f"exclude-packages-{ARCH}") or []))
+    seen = {}
+    for item in items:
+        for word in str(item).split():
+            seen[word] = None
+    return list(seen)
+
+
+# --------------------------------------------------------------------------
+# bootc rootfs glue (what rpm-ostree did around the package install)
+# --------------------------------------------------------------------------
+
+def rootfs_glue(target, manifest, no_initramfs):
+    # System users. Prefer the target's own systemd-sysusers so its policy
+    # and config are used; its output lands in the target's /etc.
+    log("Running systemd-sysusers")
+    if shutil.which("systemd-sysusers"):
+        run(["systemd-sysusers", f"--root={target}"])
+    else:
+        bwrap_run(target, ["/usr/bin/systemd-sysusers"])
+
+    # Apply preset enablement (the same unit links a booted system expects).
+    log("Applying systemd presets")
+    bwrap_run(target, ["/usr/bin/systemctl", "preset-all"], check=False)
+
+    # Runtime compatibility glue.
+    os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
+    var_tmp = os.path.join(target, "var/tmp")
+    if not os.path.isdir(var_tmp):
+        os.makedirs(var_tmp)
+        os.chmod(var_tmp, 0o1777)
+    var_run = os.path.join(target, "var/run")
+    if not os.path.lexists(var_run):
+        os.symlink("../run", var_run)
+
+    # Never persist a machine-id in the image.
+    os.makedirs(os.path.join(target, "etc"), exist_ok=True)
+    open(os.path.join(target, "etc/machine-id"), "w").close()
+
+    # bootc requires /sysroot and the ostree -> sysroot/ostree link.
+    os.makedirs(os.path.join(target, "sysroot"), exist_ok=True)
+    ostree_link = os.path.join(target, "ostree")
+    if not os.path.lexists(ostree_link):
+        os.symlink("sysroot/ostree", ostree_link)
+
+    # Keep /boot empty and stage EFI binaries under /usr/lib/ostree-boot,
+    # like rpm-ostree. A non-empty /boot makes systemd's gpt-auto-generator
+    # target /efi (which no bootc image ships).
+    boot = os.path.join(target, "boot")
+    if os.path.isdir(boot):
+        src_efi = os.path.join(boot, "efi")
+        if os.path.isdir(src_efi):
+            dst_efi = os.path.join(target, "usr/lib/ostree-boot/efi")
+            os.makedirs(os.path.dirname(dst_efi), exist_ok=True)
+            shutil.copytree(src_efi, dst_efi, dirs_exist_ok=True)
+        for ent in os.listdir(boot):
+            path = os.path.join(boot, ent)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+    # Generate bootupd update metadata (used by bootc install / updates).
+    log("Generating bootloader update metadata")
+    bwrap_run(target, ["/usr/bin/bootupctl", "backend", "generate-update-metadata"],
+              check=False)
+
+    if not no_initramfs:
+        generate_initramfs(target)
+
+    rpmdb_target_layout(target)
+
+    # No runtime/log state, no dnf state, in the image.
+    for d in ("run", "var/log"):
+        p = os.path.join(target, d)
+        env = os.listdir(p) if os.path.isdir(p) else []
+        for ent in env:
+            child = os.path.join(p, ent)
+            if os.path.isdir(child) and not os.path.islink(child):
+                shutil.rmtree(child)
+            else:
+                os.remove(child)
+    shutil.rmtree(os.path.join(target, "dnf"), ignore_errors=True)
+    shutil.rmtree(os.path.join(target, "var/lib/dnf"), ignore_errors=True)
+
+    # Make the root directory world-readable/traversable (rpm-ostree does).
+    os.chmod(target, os.stat(target).st_mode | 0o555)
+
+
+def generate_initramfs(target):
+    modules_dir = os.path.join(target, "usr/lib/modules")
+    if not os.path.isdir(modules_dir):
+        log("No kernels installed; skipping initramfs")
+        return
+    for kver in sorted(os.listdir(modules_dir)):
+        if not os.path.exists(os.path.join(modules_dir, kver, "vmlinuz")):
+            continue
+        log(f"Generating initramfs for {kver}")
+        bwrap_run(target, ["/usr/bin/dracut", "--reproducible", "--add", "ostree",
+                           "--no-hostonly", "-f",
+                           f"/usr/lib/modules/{kver}/initramfs.img",
+                           "--kver", kver])
+
+
+def rpmdb_target_layout(target):
+    """Move the rpmdb to /usr/share/rpm (classic dbpath), add compat
+    symlinks and the %_dbpath macro, and drop transient sqlite files."""
+    log("Relocating rpmdb to /usr/share/rpm")
+    dbdir = os.path.join(target, "usr/share/rpm")
+    srcdir = os.path.join(target, "usr/lib/sysimage/rpm")
+    if os.path.isdir(srcdir) and not os.path.islink(srcdir):
+        shutil.rmtree(dbdir, ignore_errors=True)
+        os.rename(srcdir, dbdir)
+        dbfile = os.path.join(dbdir, "rpmdb.sqlite")
+        if os.path.exists(dbfile):
+            # dnf leaves journal_mode=wal; rpm queries in the image would
+            # recreate -shm/-wal sidecars otherwise.
+            try:
+                conn = sqlite3.connect(dbfile)
+                conn.execute("PRAGMA journal_mode=DELETE;")
+                conn.commit()
+                conn.close()
+            except sqlite3.Error as e:
+                print(f"warning: could not normalize sqlite journal mode: {e}")
+        for ent in os.listdir(dbdir):
+            if (ent in (".dbenv.lock", ".rpm.lock", ".keyring.lock")
+                    or ent.startswith("__db.") or ent.endswith((".lock", "-shm", "-wal"))):
+                os.remove(os.path.join(dbdir, ent))
+        os.makedirs(os.path.dirname(srcdir), exist_ok=True)
+        os.symlink("../../share/rpm", srcdir)
+
+    var_lib_rpm = os.path.join(target, "var/lib/rpm")
+    if os.path.lexists(var_lib_rpm) and not os.path.islink(var_lib_rpm):
+        shutil.rmtree(var_lib_rpm, ignore_errors=True)
+    if not os.path.lexists(var_lib_rpm):
+        os.makedirs(os.path.dirname(var_lib_rpm), exist_ok=True)
+        os.symlink("../../usr/share/rpm", var_lib_rpm)
+
+    macros_dir = os.path.join(target, "usr/lib/rpm/macros.d")
+    os.makedirs(macros_dir, exist_ok=True)
+    with open(os.path.join(macros_dir, "macros.rpm-ostree"), "w") as f:
+        f.write("%_dbpath /usr/share/rpm\n")
+
+
+# --------------------------------------------------------------------------
+
+def build_rootfs(args):
+    manifest = json.load(open(args.manifest))
+    target = args.target
+    if os.path.exists(target):
+        shutil.rmtree(target)
+    os.makedirs(target)
+
+    configure_dnf(target, args.repos_from)
+
+    argv = ["dnf5", "install", "-y", f"--installroot={target}"]
+    if not manifest.get("install-weak-deps", True):
+        argv.append("--setopt=install_weak_deps=false")
+    if manifest.get("documentation", False) is False:
+        argv.append("--setopt=tsflags=nodocs")
+    for e in exclude_list(manifest):
+        argv.append(f"--exclude={e}")
+    argv += package_list(manifest)
+
+    log("Installing packages with dnf5 --installroot")
+    run(argv)
+
+    rootfs_glue(target, manifest, args.no_initramfs)
+
+    log("Validating with bootc container lint")
+    run(["bootc", "container", "lint", f"--rootfs={target}"])
+
+    log("Done")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("build-rootfs", help="compose a rootfs into TARGET")
+    p.add_argument("manifest", help="JSON manifest (see manifest.json)")
+    p.add_argument("target", help="target directory (must not exist)")
+    p.add_argument("--repos-from", default="/",
+                   help="source root providing dnf repos/config (default: /)")
+    p.add_argument("--no-initramfs", action="store_true",
+                   help="skip dracut initramfs generation")
+    p.set_defaults(func=build_rootfs)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
