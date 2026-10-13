@@ -27,6 +27,12 @@ test: build
     {{builder}} build --from {{image}} -f tests/rootfs/Dockerfile \
         -t {{image}}-test tests/rootfs
 
+# Build the derived test image used by the tmt VM plan (adds sshd).
+[group('test')]
+test-image: build
+    {{builder}} build -f test-images/openssh/Containerfile \
+        --build-arg BASE={{image}}:latest -t {{image}}-sshd .
+
 # Build the guest image used by the tmt container plan.
 [group('test')]
 tmt-guest:

@@ -22,8 +22,7 @@
         "efibootmgr",
         "bootupd",
         "grub2-common",
-        "grub2-tools",
-        "openssh-server"
+        "grub2-tools"
     ],
     "packages-aarch64": [
         "grub2-efi-aa64",
