@@ -1,0 +1,15 @@
+#!/usr/bin/expect -f
+# Drive the interactive system-reinstall-bootc prompts non-interactively
+# (the tool asks for confirmation and then schedules a reboot).
+set timeout 900
+set image [lindex $argv 0]
+spawn system-reinstall-bootc $image
+expect {
+    -re "Are you sure you want to continue\\? \\\[y/N\\\]" { send "y"; exp_continue }
+    -re "Are you sure you want to continue\\? \\\[Y/n\\\]" { send "\r"; exp_continue }
+    -re "using those keys\\. \\\[Y/n\\\]" { send "\r"; exp_continue }
+    -re "Press .enter. to continue" { send "\r"; exp_continue }
+    -re "rebooting in .* seconds" { send "\x03"; exp_continue }
+    eof {}
+    timeout { exit 1 }
+}
