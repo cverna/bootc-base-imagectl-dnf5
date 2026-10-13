@@ -8,7 +8,7 @@ discover:
     - /tmt/tests/booted
 provision:
   how: virtual
-  image: $@{test_disk_image}
+  image: fedora-rawhide
   memory: 4096
 prepare:
   - how: install
