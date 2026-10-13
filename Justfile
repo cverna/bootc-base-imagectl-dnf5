@@ -39,10 +39,17 @@ tmt-guest:
         --build-arg BASE={{tag}} -t {{image}}-tmt .
 
 # Build the derived image used by the tmt VM plan (adds tmt's own guest deps).
+# The real build (in the plan) also bakes the tmt workdir in via ARTIFACTS.
 [group('test')]
 test-image: build
-    {{builder}} build -f test-images/tmt/Containerfile \
-        --build-arg BASE={{tag}} -t {{image}}-tmt-test .
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ctx=$(mktemp -d)
+    trap 'rm -rf "$ctx"' EXIT
+    mkdir -p "$ctx/ARTIFACTS"
+    cp test-images/tmt/Containerfile "$ctx/Containerfile"
+    {{builder}} build -f "$ctx/Containerfile" --build-arg BASE={{tag}} \
+        -t {{image}}-tmt-test "$ctx"
 
 # Install to a loop device and validate the deployment (needs root).
 [group('disk')]

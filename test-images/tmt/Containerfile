@@ -1,11 +1,17 @@
 # Derived image for the VM (tmt / Testing Farm) tests.
 #
-# The shipped image stays faithful to base-images; this only adds what tmt
-# itself needs on the guest. In particular tmt pushes the test workdir with
-# rsync, and runs an AVC check that wants audit tooling (mirrors bootc's
-# hack/packages.txt).
+# The shipped image stays faithful to base-images; this only adds what the
+# test harness needs on the guest:
+#   - rsync + audit: tmt pushes the test workdir with rsync and runs an AVC
+#     check (mirrors bootc's hack/packages.txt).
+#   - ARTIFACTS: a reinstall replaces /var, and the guest has /var on its own
+#     subvolume which bootc leaves unmounted, so tmt's workdir under
+#     /var/ARTIFACTS would be lost. Content in /var in the image is unpacked
+#     into the new system's /var, so we bake the workdir in (like bootc's
+#     hack/Containerfile.packit). The build context must contain ARTIFACTS.
 ARG BASE=ghcr.io/cverna/bootc-base-imagectl-dnf5:standard
 FROM ${BASE}
+COPY ARTIFACTS /var/ARTIFACTS
 RUN dnf -y install rsync audit \
  && dnf -y clean all \
  && rm -rf /var/cache/dnf

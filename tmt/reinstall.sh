@@ -9,8 +9,8 @@
 # the build, so wait for it to appear.
 #
 # The shipped image stays faithful to base-images; a small derived image adds
-# the dependencies tmt needs on the guest (rsync to push the test workdir,
-# audit for the AVC check).
+# what the harness needs on the guest (rsync + audit) and bakes in the tmt
+# workdir under /var/ARTIFACTS, because a reinstall replaces /var.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tree=$(cd "$here/.." && pwd)
@@ -32,6 +32,10 @@ for i in $(seq 1 45); do
 done
 podman image exists "$img" || { echo "error: $img is not available" >&2; exit 1; }
 
+builddir=$(mktemp -d)
+trap 'rm -rf "$builddir"' EXIT
+cp "$tree/test-images/tmt/Containerfile" "$builddir/Containerfile"
+cp -a /var/ARTIFACTS "$builddir/ARTIFACTS"
 podman build -t "$testimg" --build-arg BASE="$img" \
-    -f "$tree/test-images/tmt/Containerfile" "$tree"
+    -f "$builddir/Containerfile" "$builddir"
 expect "$here/reinstall.exp" "containers-storage:$testimg"
