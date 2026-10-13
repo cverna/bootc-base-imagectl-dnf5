@@ -182,7 +182,11 @@ just overrides `CMD`.)
 
 `tmt/plans/booted.fmf` provisions a Fedora cloud VM, reinstalls it from the
 built **standard** image (`system-reinstall-bootc` + `tmt-reboot`), and runs
-`tmt/tests/booted/` against the booted system:
+`tmt/tests/booted/` against the booted system. It reinstalls the
+per-commit image (`ghcr.io/...:<sha>-standard`, published by CI), so it
+always tests the commit under test rather than a floating tag. The shipped
+image stays faithful to base-images; `test-images/tmt/` derives a small
+image adding the dependencies tmt needs on the guest (`rsync`, `audit`):
 
 - `reinstall` - reinstall the VM from the image and reboot into it
 - `selinux` - SELinux enforcing

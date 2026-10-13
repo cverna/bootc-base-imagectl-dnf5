@@ -19,5 +19,7 @@ prepare:
       - jq
       - zstd
       - expect
+      # tmt pushes the test workdir to the guest with rsync.
+      - rsync
 execute:
   how: tmt

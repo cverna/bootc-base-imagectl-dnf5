@@ -38,6 +38,12 @@ tmt-guest:
     {{builder}} build -f tmt/Containerfile.guest \
         --build-arg BASE={{tag}} -t {{image}}-tmt .
 
+# Build the derived image used by the tmt VM plan (adds tmt's own guest deps).
+[group('test')]
+test-image: build
+    {{builder}} build -f test-images/tmt/Containerfile \
+        --build-arg BASE={{tag}} -t {{image}}-tmt-test .
+
 # Install to a loop device and validate the deployment (needs root).
 [group('disk')]
 disk-test:

@@ -1,0 +1,12 @@
+# Derived image for the VM (tmt / Testing Farm) tests.
+#
+# The shipped image stays faithful to base-images; this only adds what tmt
+# itself needs on the guest. In particular tmt pushes the test workdir with
+# rsync, and runs an AVC check that wants audit tooling (mirrors bootc's
+# hack/packages.txt).
+ARG BASE=ghcr.io/cverna/bootc-base-imagectl-dnf5:standard
+FROM ${BASE}
+RUN dnf -y install rsync audit \
+ && dnf -y clean all \
+ && rm -rf /var/cache/dnf
+LABEL containers.bootc 1

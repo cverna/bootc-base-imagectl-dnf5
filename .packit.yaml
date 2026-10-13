@@ -3,16 +3,11 @@
 # No RPM/spec file exists in this repo, so the test job uses skip_build: true
 # (Packit then does not require a spec file). Packit submits the tmt plan to
 # the Testing Farm public ranch, which provides KVM-capable VMs.
+#
+# Only main is triggered: the plan reinstalls the per-commit image published
+# by the build workflow, and that is only published for pushes (not for pull
+# requests), so a PR run would have no image to test.
 jobs:
-  - job: tests
-    trigger: pull_request
-    identifier: booted
-    skip_build: true
-    targets:
-      - fedora-latest-stable-x86_64
-      - fedora-latest-stable-aarch64
-    tmt_plan: /tmt/plans/booted
-
   - job: tests
     trigger: commit
     branch: main
