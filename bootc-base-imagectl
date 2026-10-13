@@ -369,8 +369,48 @@ def rpmdb_target_layout(target):
         f.write("%_dbpath /usr/share/rpm\n")
 
 
+def setup_var_links(target):
+    """Point the writable top-level paths at /var (and /run/media), like the
+    rpm-ostree images: the image root is read-only, so /home, /mnt, /srv and
+    root's home must live on writable storage. bootc's
+    `--root-ssh-authorized-keys` resolves the /root symlink to decide where to
+    write the injected key, so without it the key lands in /root/.ssh
+    (unwritable at boot) and sshd never sees it."""
+    dirs = {
+        "var/home": 0o755,
+        "var/mnt": 0o755,
+        "var/srv": 0o755,
+        "var/roothome": 0o700,
+        "var/roothome/.ssh": 0o700,
+    }
+    for rel, mode in dirs.items():
+        path = os.path.join(target, rel)
+        os.makedirs(path, exist_ok=True)
+        os.chmod(path, mode)
+    links = {
+        "home": "var/home",
+        "mnt": "var/mnt",
+        "srv": "var/srv",
+        "root": "var/roothome",
+        "media": "run/media",
+    }
+    for name, dest in links.items():
+        path = os.path.join(target, name)
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+        os.symlink(dest, path)
+    # /run is a tmpfs at boot, so /media's target has to be declared.
+    tmpfiles_dir = os.path.join(target, "usr/lib/tmpfiles.d")
+    os.makedirs(tmpfiles_dir, exist_ok=True)
+    with open(os.path.join(tmpfiles_dir, "bootc-base-imagectl.conf"), "w") as f:
+        f.write("d /run/media 0755 root root -\n")
+
+
 def finalize_rootfs(target):
     # Runtime compatibility glue that isn't expressed in the manifests.
+    setup_var_links(target)
     os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
     var_tmp = os.path.join(target, "var/tmp")
     if not os.path.isdir(var_tmp):

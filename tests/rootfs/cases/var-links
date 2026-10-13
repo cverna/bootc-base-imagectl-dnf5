@@ -1,0 +1,14 @@
+#!/bin/bash
+set -xeuo pipefail
+# The rpm-ostree images point the writable top-level paths at /var (and
+# /run/media); the image root is read-only. /root must be a symlink because
+# bootc's root-ssh-authorized-keys import resolves it to find where to write
+# the injected key.
+test "$(readlink root)" = "var/roothome"
+test "$(readlink home)" = "var/home"
+test "$(readlink mnt)" = "var/mnt"
+test "$(readlink srv)" = "var/srv"
+test "$(readlink media)" = "run/media"
+for d in var/home var/mnt var/srv; do test -d "$d"; done
+test -d var/roothome
+test "$(stat -c '%a' var/roothome)" = "700"

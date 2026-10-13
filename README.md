@@ -49,8 +49,10 @@ it is reachable after a reinstall. `latest` tracks `standard`.
    include order, preserving order within a file) — these set up
    `prepare-root.conf`, bootupd metadata, kernel-install/dnf config, dracut
    config, systemd presets, tmpfiles, and so on;
-8. finalizes the rootfs (`/var` compatibility, empty `/etc/machine-id`,
-   `/sysroot`, `ostree -> sysroot/ostree`, runtime state removed);
+8. finalizes the rootfs: the writable top-level paths become symlinks into
+   `/var` (`/home`, `/mnt`, `/srv`, `/root`) and `/run/media` (`/media`), like
+   the rpm-ostree images; plus `/var` compatibility, empty `/etc/machine-id`,
+   `/sysroot`, `ostree -> sysroot/ostree`, and runtime state removed;
 9. generates the initramfs with `dracut`, relocates the rpmdb to
    `/usr/share/rpm` with the compat symlinks and `%_dbpath` macro;
 10. runs `bootc container lint`.
@@ -109,6 +111,11 @@ Not yet handled (deliberately out of scope for the PoC):
 
 - `check-passwd`/`check-groups` enforcement and the nss-altfiles passwd split
   (see above);
+- the rpm-ostree `/var` model: it builds the committed root from a minimal
+  tree (moving only `/usr`, `/boot`, `/var`) and rewrites package `/var`
+  content as tmpfiles.d entries, so its `/var` has ~5 entries. We compose in
+  place, leaving package `/var` content behind (the `var-tmpfiles` lint
+  warning) and not running the manifests' `finalize.d` scripts;
 - byte-reproducible rpmdb (`INSTALLTIME`/`INSTALLTID` normalization);
 - SELinux policy recompilation (contexts are applied at deployment);
 - cross-architecture and cross-version builds, chunked/layered output
