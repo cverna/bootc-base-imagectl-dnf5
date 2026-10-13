@@ -1,0 +1,3 @@
+summary: Kernel and initramfs are bootable (BLS entry has initrd)
+test: ./initramfs.sh
+order: 22

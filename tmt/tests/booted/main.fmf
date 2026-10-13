@@ -1,0 +1,3 @@
+summary: Booted-system tests for the built image
+framework: shell
+duration: 15m

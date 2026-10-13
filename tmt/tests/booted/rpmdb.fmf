@@ -1,0 +1,3 @@
+summary: rpmdb layout and no transient sqlite sidecars
+test: ./rpmdb.sh
+order: 23

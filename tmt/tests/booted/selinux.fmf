@@ -1,0 +1,3 @@
+summary: SELinux is enforcing
+test: ./selinux.sh
+order: 20

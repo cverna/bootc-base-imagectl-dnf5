@@ -1,0 +1,23 @@
+summary: Boot the built image in a VM and run booted-system tests
+# This plan needs a KVM-capable runner (or Testing Farm). It provisions a
+# Fedora cloud VM, reinstalls it from the built image, reboots, then runs
+# the /tmt/tests/booted tests against the booted bootc system.
+discover:
+  how: fmf
+  test:
+    - /tmt/tests/booted
+provision:
+  how: virtual
+  image: $@{test_disk_image}
+  memory: 4096
+prepare:
+  - how: install
+    package:
+      - podman
+      - bootc
+      - system-reinstall-bootc
+      - jq
+      - zstd
+      - expect
+execute:
+  how: tmt

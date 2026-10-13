@@ -1,0 +1,6 @@
+# tmt's container provisioner needs a long-running container to exec into;
+# the bootc image itself runs systemd as PID1 (CMD /sbin/init). Derive a
+# guest that just stays alive - the tests inspect the same rootfs.
+ARG BASE=ghcr.io/cverna/bootc-base-imagectl-dnf5:latest
+FROM ${BASE}
+CMD ["sleep", "infinity"]

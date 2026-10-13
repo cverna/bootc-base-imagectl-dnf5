@@ -1,0 +1,3 @@
+summary: Reinstall the VM from the built image and reboot into it
+test: ./reinstall.sh
+order: 10

@@ -1,0 +1,4 @@
+summary: Rootfs sanity cases
+test: ./rootfs.sh
+framework: shell
+duration: 10m

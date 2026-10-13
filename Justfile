@@ -27,6 +27,12 @@ test: build
     {{builder}} build --from {{image}} -f tests/rootfs/Dockerfile \
         -t {{image}}-test tests/rootfs
 
+# Build the guest image used by the tmt container plan.
+[group('test')]
+tmt-guest:
+    {{builder}} build -f tmt/Containerfile.guest \
+        --build-arg BASE={{image}}:latest -t {{image}}-tmt .
+
 # Install to a loop device and validate the deployment (needs root).
 [group('disk')]
 disk-test:

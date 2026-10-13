@@ -1,0 +1,3 @@
+summary: The image is usable for package management (dnf works)
+test: ./dnf.sh
+order: 24

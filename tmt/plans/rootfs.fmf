@@ -1,0 +1,12 @@
+summary: Run the rootfs sanity cases inside the built image
+discover:
+  how: fmf
+  test:
+    - /tmt/tests/rootfs
+provision:
+  how: container
+  # Built by `just tmt-guest` from tmt/Containerfile.guest (or in CI).
+  image: localhost/bootc-base-imagectl-dnf5-tmt
+  pull: false
+execute:
+  how: tmt

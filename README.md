@@ -118,6 +118,48 @@ CI runs `lint`, the rootfs tests, and the disk test on each architecture.
 [fedora-coreos-config]: https://github.com/coreos/fedora-coreos-config/tree/main/tests/kola
 [fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
 
+## tmt integration tests
+
+The repository ships [tmt] metadata under `.fmf/` and `tmt/`, following the
+same shape as bootc's own integration tests.
+
+### Container plan (anywhere)
+
+`tmt/plans/rootfs.fmf` runs the rootfs sanity cases *inside* the image using
+tmt's container provisioner:
+
+```bash
+just tmt-guest                 # derive the long-running guest image
+tmt run -a plan -n rootfs
+```
+
+(The guest image exists only because the bootc image runs systemd as PID1,
+which tmt's container provisioner cannot keep alive; `tmt/Containerfile.guest`
+just overrides `CMD`.)
+
+### VM plan (needs KVM / Testing Farm)
+
+`tmt/plans/booted.fmf` provisions a Fedora cloud VM, reinstalls it from the
+built image (`system-reinstall-bootc` + `tmt-reboot`), and runs
+`tmt/tests/booted/` against the booted system:
+
+- `reinstall` - reinstall the VM from the image and reboot into it
+- `selinux` - SELinux enforcing
+- `systemd` - no failed units
+- `initramfs` - kernel/initramfs bootable (BLS entry has `initrd`)
+- `rpmdb` - rpmdb layout, no transient sqlite sidecars
+- `dnf` - package management works
+
+```bash
+tmt run -a plan -n booted
+```
+
+This requires a KVM-capable host (GitHub-hosted runners have no `/dev/kvm`);
+in CI it is meant to run on [Testing Farm] via Packit, like bootc.
+
+[tmt]: https://tmt.readthedocs.io/
+[Testing Farm]: https://docs.testing-farm.io/
+
 ## CI
 
 `.github/workflows/build.yml` builds the image for **amd64 and arm64** on

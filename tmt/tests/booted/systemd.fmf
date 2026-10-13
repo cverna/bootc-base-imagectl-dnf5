@@ -1,0 +1,3 @@
+summary: No failed systemd units
+test: ./systemd.sh
+order: 21
