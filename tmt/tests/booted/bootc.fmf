@@ -1,0 +1,4 @@
+summary: The booted system is running the image we installed
+test: ./bootc.sh
+framework: shell
+duration: 5m

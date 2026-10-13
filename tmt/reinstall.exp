@@ -1,6 +1,7 @@
 #!/usr/bin/expect -f
 # Drive the interactive system-reinstall-bootc prompts non-interactively
-# (the tool asks for confirmation and then schedules a reboot).
+# (the tool asks for confirmation and then schedules a reboot, which we cancel
+# so that the ansible reboot in prepare can do it).
 set timeout 900
 set image [lindex $argv 0]
 spawn system-reinstall-bootc $image

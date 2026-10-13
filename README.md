@@ -181,14 +181,15 @@ just overrides `CMD`.)
 ### VM plan (needs KVM / Testing Farm)
 
 `tmt/plans/booted.fmf` provisions a Fedora cloud VM, reinstalls it from the
-built **standard** image (`system-reinstall-bootc` + `tmt-reboot`), and runs
-`tmt/tests/booted/` against the booted system. It reinstalls the
+built **standard** image and reboots it **in the prepare step** (a reinstall
+replaces `/var`, so the tests' workdir has to be created afterwards; and
+`tmt-reboot` does not work in prepare, so ansible reboots). It reinstalls the
 per-commit image (`ghcr.io/...:<sha>-standard`, published by CI), so it
 always tests the commit under test rather than a floating tag. The shipped
 image stays faithful to base-images; `test-images/tmt/` derives a small
 image adding the dependencies tmt needs on the guest (`rsync`, `audit`):
 
-- `reinstall` - reinstall the VM from the image and reboot into it
+- `bootc` - the booted system is running the installed image
 - `selinux` - SELinux enforcing
 - `systemd` - no failed units
 - `initramfs` - kernel/initramfs bootable (BLS entry has `initrd`)

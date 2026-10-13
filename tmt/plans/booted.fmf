@@ -1,7 +1,12 @@
 summary: Boot the built image in a VM and run booted-system tests
 # This plan needs a KVM-capable runner (or Testing Farm). It provisions a
-# Fedora cloud VM, reinstalls it from the built image, reboots, then runs
-# the /tmt/tests/booted tests against the booted bootc system.
+# Fedora cloud VM, reinstalls it from the built image and reboots it *in
+# prepare*, then runs the /tmt/tests/booted tests against the booted bootc
+# system.
+#
+# The reinstall must happen in prepare: it replaces /var, so a tmt execute
+# workdir created before it would be wiped, and tmt could not push the tests.
+# tmt-reboot/reboot do not work in prepare, so the reboot is done by ansible.
 discover:
   how: fmf
   test:
@@ -19,7 +24,17 @@ prepare:
       - jq
       - zstd
       - expect
-      # tmt pushes the test workdir to the guest with rsync.
+      # tmt pushes the prepare/execute scripts to the guest with rsync.
       - rsync
+      # Used for the reboot below.
+      - ansible-core
+  - how: shell
+    name: reinstall
+    script: bash "$TMT_TREE/tmt/reinstall.sh"
+  # tmt-reboot and reboot do not work in prepare; ansible is the only way.
+  - how: ansible
+    name: reboot
+    playbook:
+      - https://github.com/cverna/bootc-base-imagectl-dnf5/raw/refs/heads/main/tmt/reboot.yml
 execute:
   how: tmt
