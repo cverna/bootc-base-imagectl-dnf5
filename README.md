@@ -223,7 +223,7 @@ Notes:
 
 The manifests under `manifests/` are copied from
 [fedora/bootc/base-images] (MIT, Fedora CoreOS Authors — see
-`manifests/COPYING`). To refresh them, run `hack/sync-manifests.sh`.
+`manifests/COPYING`); `manifests/UPSTREAM` records the upstream commit.
 
 ## License
 
