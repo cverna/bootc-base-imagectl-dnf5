@@ -35,8 +35,9 @@ This is intentionally **dnf5-only**: there is no rpm-ostree code path.
    - runtime/log/dnf state removed;
 4. runs `bootc container lint`.
 
-- The minimal image has no `sshd`; the VM (tmt) plan derives a test image
-  from it (see `test-images/`) so Testing Farm can reconnect after
+- The minimal image has no `sshd` or network manager; the VM (tmt) plan
+  derives a test image from it (see `test-images/openssh/`) adding
+  `openssh-server` + `NetworkManager`, so Testing Farm can reconnect after
   reinstalling a guest from the image.
 
 Users are kept inline in `/etc` (`passwd: files systemd`), following the
