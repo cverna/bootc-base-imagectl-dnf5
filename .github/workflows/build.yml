@@ -19,9 +19,22 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # Build each architecture on a native runner. QEMU emulation is *not*
-  # usable here: the compose runs package tooling through bubblewrap, and
-  # bwrap cannot create namespaces under qemu-user ("Creating new namespace
+  # Cheap: validate that the vendored base-images manifests still resolve to
+  # the expected tiers (no container build required).
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve manifests
+        run: |
+          set -euxo pipefail
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install pyyaml
+          PATH=/tmp/venv/bin:$PATH ./tests/manifest/run
+
+  # Build each tier on each architecture with a native runner. QEMU emulation
+  # is *not* usable here: the compose runs package tooling through bubblewrap,
+  # and bwrap cannot create namespaces under qemu-user ("Creating new namespace
   # failed: Invalid argument"). See the same limitation in
   # https://gitlab.com/fedora/bootc/base-images/-/issues/57
   build:
@@ -29,6 +42,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        tier: [minimal, standard]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-latest
@@ -45,30 +60,34 @@ jobs:
           fi
           podman --version
 
-      - name: Build ${{ matrix.arch }} image
+      - name: Build ${{ matrix.tier }} (${{ matrix.arch }}) image
         run: |
           set -euxo pipefail
           sudo podman build \
             --arch=${{ matrix.arch }} \
             --security-opt=label=disable --cap-add=all \
+            --build-arg=MANIFEST=${{ matrix.tier }} \
             --build-arg=IMAGE_VERSION="${GITHUB_REF_NAME}" \
-            -t "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" .
+            -t "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}" .
 
       - name: Lint image
-        run: sudo podman run --rm --entrypoint bootc "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" container lint
+        run: |
+          sudo podman run --rm --entrypoint bootc \
+            "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}" container lint
 
       - name: Rootfs tests
         run: |
           set -euxo pipefail
           sudo podman build --arch=${{ matrix.arch }} \
-            --from "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}" \
+            --from "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}" \
+            --build-arg=TIER=${{ matrix.tier }} \
             -f tests/rootfs/Dockerfile \
-            -t "${IMAGE}:test-${{ matrix.arch }}" tests/rootfs
+            -t "${IMAGE}:test-${{ matrix.tier }}-${{ matrix.arch }}" tests/rootfs
 
       - name: Disk install test
         run: |
           set -euxo pipefail
-          sudo tests/disk/run "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}"
+          sudo tests/disk/run "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}"
 
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
@@ -76,9 +95,10 @@ jobs:
           set -euxo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          sudo podman push "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.arch }}"
+          sudo podman push "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}"
 
-  # Assemble and push the multi-arch manifest from the per-arch images.
+  # Assemble and push the multi-arch manifest for each tier from the per-arch
+  # images. `latest` tracks the standard tier.
   manifest:
     needs: build
     if: github.event_name == 'push'
@@ -97,19 +117,31 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Create and push manifest
+      - name: Create and push manifests
         run: |
           set -euxo pipefail
           sha="${GITHUB_SHA::12}"
-          sudo podman manifest create "${IMAGE}:${sha}"
-          for arch in amd64 arm64; do
-            sudo podman manifest add "${IMAGE}:${sha}" "docker://${IMAGE}:${sha}-${arch}"
-          done
-          sudo podman manifest push --all "${IMAGE}:${sha}"
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            sudo podman manifest create "${IMAGE}:latest"
-            for arch in amd64 arm64; do
-              sudo podman manifest add "${IMAGE}:latest" "docker://${IMAGE}:${sha}-${arch}"
+          create_manifest() {
+            local out=$1; shift
+            sudo podman manifest create "$out"
+            for ref in "$@"; do
+              sudo podman manifest add "$out" "docker://$ref"
             done
-            sudo podman manifest push --all "${IMAGE}:latest"
+            sudo podman manifest push --all "$out"
+          }
+          for tier in minimal standard; do
+            refs=()
+            for arch in amd64 arm64; do
+              refs+=("${IMAGE}:${sha}-${tier}-${arch}")
+            done
+            create_manifest "${IMAGE}:${tier}" "${refs[@]}"
+            create_manifest "${IMAGE}:${sha}-${tier}" "${refs[@]}"
+          done
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            create_manifest "${IMAGE}:latest" \
+              "${IMAGE}:${sha}-standard-amd64" \
+              "${IMAGE}:${sha}-standard-arm64"
+            create_manifest "${IMAGE}:${sha}" \
+              "${IMAGE}:${sha}-standard-amd64" \
+              "${IMAGE}:${sha}-standard-arm64"
           fi

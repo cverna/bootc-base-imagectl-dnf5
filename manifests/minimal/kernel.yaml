@@ -1,0 +1,12 @@
+# Enable the Linux kernel; see also kernel-rt.
+packages:
+ - kernel
+
+exclude-packages:
+  - kernel-debug
+  - kernel-debug-core
+  - kernel-debug-modules
+  - kernel-debug-modules-core
+  - kernel-debug-modules-extra
+  - kernel-debug-uki-virt
+  - kernel-debug-uki-virt-addons

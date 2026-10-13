@@ -1,56 +1,84 @@
 # bootc-base-imagectl-dnf5
 
-A minimal proof of concept for building **Fedora bootc base images with
-`dnf5` instead of `rpm-ostree`**.
+A proof of concept for building **Fedora bootc base images with `dnf5`
+instead of `rpm-ostree`**.
 
 Fedora's base images are currently composed with `rpm-ostree compose rootfs`
 driven by treefile manifests (see [fedora/bootc/base-images]). With
 `rpm-ostree` slated to be dropped from CentOS Stream / RHEL 11 and Fedora,
-this prototype explores the replacement path: use `dnf5 --installroot` to
-compose the root filesystem, then apply the (small) amount of glue a bootc
-image actually needs, and validate the result with `bootc container lint`.
+this prototype explores the replacement path: resolve the *same* manifests,
+use `dnf5 --installroot` to compose the root filesystem, apply the (small)
+amount of glue a bootc image actually needs, and validate the result with
+`bootc container lint`.
 
 This is intentionally **dnf5-only**: there is no rpm-ostree code path.
 
+## Tiers
+
+The base-images content tiers are vendored under `manifests/` and consumed
+verbatim, so the package sets and postprocessing match upstream:
+
+| tier       | manifest                  | packages | notes |
+|------------|---------------------------|----------|-------|
+| `minimal`  | `manifests/minimal.yaml`  | ~22 (+deps) | bootc, systemd, kernel, dnf; no sshd, no NetworkManager |
+| `standard` | `manifests/standard.yaml` | ~97 (+deps) | minimal-plus + networking tools, system config, full initramfs; **sshd + NetworkManager** |
+
+`standard` is the tier the VM (tmt/Testing Farm) tests run against, because
+it is reachable after a reinstall. `latest` tracks `standard`.
+
 ## How it works
 
-`bootc-base-imagectl build-rootfs manifest.json TARGET`:
+`bootc-base-imagectl build-rootfs MANIFEST TARGET`:
 
-1. seeds the installroot's dnf config (repos, GPG keys, `releasever`) from a
+1. **resolves** the manifest, a YAML treefile with `include` /
+   `conditional-include` / `variables` / `packages[-<arch>]` /
+   `exclude-packages[-<arch>]` / `remove-from-packages` / `add-files` /
+   `postprocess` / `recommends` / `container-cmd`;
+2. seeds the installroot's dnf config (repos, GPG keys, `releasever`) from a
    source root, since `dnf5 --installroot` reads its configuration from the
    installroot;
-2. installs the package set with `dnf5 install --installroot` (weak deps and
-   docs disabled per the manifest, plus `--exclude`);
-3. applies the bootc glue, laid out the way the rpm-ostree-built Fedora
-   images are:
-   - `systemd-sysusers` for system users, then `systemctl preset-all`;
-   - `/var` compatibility (`/var/run`, `/var/tmp` 1777, `/var/lib/rpm-state`);
-   - empty `/etc/machine-id`, `/sysroot`, `ostree -> sysroot/ostree`;
-   - `/boot` emptied and EFI binaries staged in `/usr/lib/ostree-boot` (a
-     non-empty `/boot` makes systemd's gpt-auto-generator target `/efi`);
-   - bootupd update metadata (`bootupctl backend generate-update-metadata`);
-   - `dracut --add ostree` initramfs per installed kernel;
-   - rpmdb relocated to `/usr/share/rpm` with the compat symlinks and the
-     `%_dbpath` macro;
-   - runtime/log/dnf state removed;
-4. runs `bootc container lint`.
+3. installs the package set with `dnf5 install --installroot` (weak deps and
+   docs per `recommends`/`documentation`, plus `--exclude`);
+4. applies `add-files` and `remove-from-packages` (files matched by regex,
+   restricted to files owned by the named package);
+5. runs `systemd-sysusers` for system users;
+6. stages the bootloader: `/boot` emptied and EFI binaries moved to
+   `/usr/lib/ostree-boot` (`boot-location: modules`; a non-empty `/boot`
+   makes systemd's gpt-auto-generator target `/efi`);
+7. runs the manifest `postprocess` scripts in rpm-ostree's order (reverse
+   include order, preserving order within a file) — these set up
+   `prepare-root.conf`, bootupd metadata, kernel-install/dnf config, dracut
+   config, systemd presets, tmpfiles, and so on;
+8. finalizes the rootfs (`/var` compatibility, empty `/etc/machine-id`,
+   `/sysroot`, `ostree -> sysroot/ostree`, runtime state removed);
+9. generates the initramfs with `dracut`, relocates the rpmdb to
+   `/usr/share/rpm` with the compat symlinks and `%_dbpath` macro;
+10. runs `bootc container lint`.
 
-- The minimal image has no `sshd` or network manager; the VM (tmt) plan
-  derives a test image from it (see `test-images/openssh/`) adding
-  `openssh-server` + `NetworkManager`, so Testing Farm can reconnect after
-  reinstalling a guest from the image.
+### Manifest resolver
+
+`bootc-base-imagectl resolve MANIFEST` prints the fully resolved manifest as
+JSON. Its output was validated to be identical to
+`rpm-ostree compose tree --print-only` for both tiers: same package set,
+excludes, `remove-from-packages`, `add-files`, and identical `postprocess`
+ordering.
+
+### Divergence: passwd model
 
 Users are kept inline in `/etc` (`passwd: files systemd`), following the
 pending "Switch away from nss-altfiles" Change
 (<https://github.com/coreos/fedora-coreos-tracker/issues/1599>) rather than
-reproducing the legacy `/usr/lib/passwd` split.
+reproducing the legacy `/usr/lib/passwd` split. The manifests' `nss-altfiles`
+package is still installed and `check-passwd`/`check-groups` are not enforced.
 
 ## Usage
 
 ```bash
-just build                  # podman build -> localhost/bootc-base-imagectl-dnf5
-just test                   # bootc container lint
-just disk                   # bootc install to a loop device -> raw + qcow2 (root)
+just tier=minimal build      # -> localhost/bootc-base-imagectl-dnf5:minimal
+just tier=standard build     # -> localhost/bootc-base-imagectl-dnf5:standard
+just tier=standard lint      # bootc container lint
+just tier=standard test      # rootfs sanity cases against the image
+just tier=standard disk      # bootc install to a loop device -> raw + qcow2 (root)
 ```
 
 `just build` needs nested-container privileges (`--security-opt=label=disable
@@ -59,7 +87,7 @@ just disk                   # bootc install to a loop device -> raw + qcow2 (roo
 ### Booting the disk (Apple silicon, vfkit)
 
 ```bash
-just disk
+just tier=standard disk
 vfkit --cpus 4 --memory 4096 \
   --bootloader efi,variable-store=efi.fd,create \
   --device virtio-blk,path=/var/tmp/bootc-base-imagectl-dnf5.raw \
@@ -67,23 +95,24 @@ vfkit --cpus 4 --memory 4096 \
   --device virtio-serial,stdio
 ```
 
-The image has no local user or unlocked root by default; derive an image
-that creates one (install `shadow-utils`, `useradd`, `chpasswd`) or inject
-credentials in the usual bootc way.
+The minimal image has no local user or unlocked root by default; derive an
+image that creates one (install `shadow-utils`, `useradd`, `chpasswd`) or
+inject credentials in the usual bootc way. The standard image ships `sshd`.
 
 ## Status
 
-Working: compose, `bootc container lint`, install to disk, and boot under
-Apple Virtualization and qemu (xfs root via the generated initramfs, SELinux
-enforcing, PAM login) — behavior matching the rpm-ostree-built minimal image.
+Working: manifest resolution, compose, `bootc container lint`, rootfs tests,
+install to disk, and boot under Apple Virtualization and qemu (xfs root via
+the generated initramfs, SELinux enforcing, PAM login) for both tiers.
 
 Not yet handled (deliberately out of scope for the PoC):
 
-- treefile semantics (includes, per-arch lists, `remove-from-packages`) —
-  the manifest here is a flat JSON list;
+- `check-passwd`/`check-groups` enforcement and the nss-altfiles passwd split
+  (see above);
 - byte-reproducible rpmdb (`INSTALLTIME`/`INSTALLTID` normalization);
 - SELinux policy recompilation (contexts are applied at deployment);
-- cross-architecture and cross-version builds, chunked/layered output.
+- cross-architecture and cross-version builds, chunked/layered output
+  (`rechunk` / chunkah).
 
 Known upstream issues observed while booting:
 
@@ -100,7 +129,8 @@ Known upstream issues observed while booting:
 
 `just test` builds a container *from* the image and runs the read-only rootfs
 sanity cases in `tests/rootfs/cases`, several ported from
-[fedora-coreos-config] and [fedora/bootc/base-images]:
+[fedora-coreos-config] and [fedora/bootc/base-images]. The `TIER` build arg
+lets tier-specific cases (e.g. the `setuid-allowlist`) assert the right set:
 
 - `fedora-only`, `root-mode`, `etc-group`, `users-groups`, `no-iptables-legacy`
 - account databases: `etc-permissions`, `gshadow` (parser regression)
@@ -113,15 +143,14 @@ sanity cases in `tests/rootfs/cases`, several ported from
 `just disk-test` (needs root) installs the image to a loop device with
 `bootc install to-disk --generic-image` (installs all bootloader types
 and skips system-firmware changes, so it works on CI runners) and validates
-the resulting deployment: ESP + root
-partitions, `/usr/lib/modules/*/initramfs.img`, the BLS entry's `initrd`,
-the rpmdb layout, and (when the host enforces SELinux) the on-disk file
-contexts.
+the resulting deployment: ESP + root partitions,
+`/usr/lib/modules/*/initramfs.img`, the BLS entry's `initrd`, the rpmdb
+layout, and (when the host enforces SELinux) the on-disk file contexts.
 
-CI runs `lint`, the rootfs tests, and the disk test on each architecture.
+CI runs `lint`, the rootfs tests, and the disk test for both tiers on each
+architecture.
 
 [fedora-coreos-config]: https://github.com/coreos/fedora-coreos-config/tree/main/tests/kola
-[fedora/bootc/base-images]: https://gitlab.com/fedora/bootc/base-images
 
 ## tmt integration tests
 
@@ -134,7 +163,7 @@ same shape as bootc's own integration tests.
 tmt's container provisioner:
 
 ```bash
-just tmt-guest                 # derive the long-running guest image
+just tier=standard tmt-guest     # derive the long-running guest image
 tmt run -a plan -n rootfs
 ```
 
@@ -145,7 +174,7 @@ just overrides `CMD`.)
 ### VM plan (needs KVM / Testing Farm)
 
 `tmt/plans/booted.fmf` provisions a Fedora cloud VM, reinstalls it from the
-built image (`system-reinstall-bootc` + `tmt-reboot`), and runs
+built **standard** image (`system-reinstall-bootc` + `tmt-reboot`), and runs
 `tmt/tests/booted/` against the booted system:
 
 - `reinstall` - reinstall the VM from the image and reboot into it
@@ -160,21 +189,23 @@ tmt run -a plan -n booted
 ```
 
 This requires a KVM-capable host (GitHub-hosted runners have no `/dev/kvm`);
-in CI it is meant to run on [Testing Farm] via Packit, like bootc.
+in CI it runs on [Testing Farm] via Packit (`.packit.yaml`), like bootc.
 
 [tmt]: https://tmt.readthedocs.io/
 [Testing Farm]: https://docs.testing-farm.io/
 
 ## CI
 
-`.github/workflows/build.yml` builds the image for **amd64 and arm64** on
+`.github/workflows/build.yml` builds **both tiers for amd64 and arm64** on
 native GitHub-hosted runners (`ubuntu-latest` and `ubuntu-24.04-arm`), runs
-`bootc container lint`, and on pushes to `main` (and tags) publishes to GHCR:
+`bootc container lint`, the rootfs tests and the disk test, and on pushes to
+`main` (and tags) publishes to GHCR:
 
-    ghcr.io/cverna/bootc-base-imagectl-dnf5:latest          # multi-arch manifest
-    ghcr.io/cverna/bootc-base-imagectl-dnf5:<short-sha>     # multi-arch manifest
-    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-amd64     # per-arch
-    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-arm64     # per-arch
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:minimal        # multi-arch manifest
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:standard       # multi-arch manifest
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:latest         # = standard
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-<tier>   # multi-arch manifest
+    ghcr.io/cverna/bootc-base-imagectl-dnf5:<sha>-<tier>-<arch>  # per-arch
 
 Notes:
 
@@ -187,8 +218,12 @@ Notes:
 - GHCR packages created from a workflow token are **private by default**;
   change the package visibility in the repository/package settings if you
   want it public.
-- Disk creation and boot tests need loop devices/KVM and are intentionally
-  not part of CI.
+
+## Manifests
+
+The manifests under `manifests/` are copied from
+[fedora/bootc/base-images] (MIT, Fedora CoreOS Authors — see
+`manifests/COPYING`). To refresh them, run `hack/sync-manifests.sh`.
 
 ## License
 

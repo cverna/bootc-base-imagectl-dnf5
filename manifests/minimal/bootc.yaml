@@ -1,0 +1,11 @@
+# The bootc components.
+packages:
+ # systemd. Also name systemd-pam because it was dropped to a recommends
+ # but we still want it for handling user logins/sessions.
+ # dbus is required per https://bugzilla.redhat.com/show_bug.cgi?id=2507313
+ - systemd systemd-pam dbus
+ # bootc itself.
+ - bootc
+ # Required by bootc install, sgdisk has been replaced by Rust crate
+ # in bootc https://github.com/containers/bootc/pull/775
+ - xfsprogs e2fsprogs dosfstools

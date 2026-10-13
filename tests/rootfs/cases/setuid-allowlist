@@ -1,7 +1,9 @@
 #!/bin/bash
 set -xeuo pipefail
-# Only the expected setuid binaries may be present.
-expected="$(cat <<'EOT' | sort
+# Only the expected setuid binaries may be present. The expected set is
+# tier-specific: the standard tier is a full server image and legitimately
+# ships things like sudo/passwd/pkexec.
+base="$(cat <<'EOT'
 /usr/bin/chfn
 /usr/bin/chsh
 /usr/bin/grub2-set-bootflag
@@ -12,6 +14,24 @@ expected="$(cat <<'EOT' | sort
 /usr/bin/unix_chkpwd
 EOT
 )"
+standard_extra="$(cat <<'EOT'
+/usr/bin/chage
+/usr/bin/fusermount3
+/usr/bin/gpasswd
+/usr/bin/mount.nfs
+/usr/bin/newgrp
+/usr/bin/passwd
+/usr/bin/pkexec
+/usr/bin/sudo
+/usr/lib/polkit-1/polkit-agent-helper-1
+EOT
+)"
+case "${TIER:-minimal}" in
+  minimal) expected="$base" ;;
+  standard) expected="$(printf '%s\n%s\n' "$base" "$standard_extra")" ;;
+  *) echo "unknown TIER=${TIER}" >&2; exit 1 ;;
+esac
+expected="$(echo "$expected" | sort)"
 actual=$(find / -xdev -perm -4000 -type f 2>/dev/null | sort)
 if [ "$actual" != "$expected" ]; then
   diff <(echo "$expected") <(echo "$actual") || true

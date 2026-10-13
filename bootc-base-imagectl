@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """bootc-base-imagectl (dnf5): compose a bootc rootfs with dnf5, no rpm-ostree.
 
-Minimal proof of concept for replacing `rpm-ostree compose rootfs` with
-`dnf5 --installroot` plus the small amount of glue that a bootc image needs.
-The result is shaped like the rpm-ostree-built Fedora images: an ostree
-rootfs layout with /usr/share/rpm, an empty /boot, boot artifacts staged in
-/usr/lib/ostree-boot, and a generated initramfs.
+Proof of concept for replacing `rpm-ostree compose rootfs` with `dnf5
+--installroot` plus the small amount of glue a bootc image needs.
+
+It consumes the *same* manifest format as the Fedora base images
+(https://gitlab.com/fedora/bootc/base-images): a YAML "treefile" with
+`include` / `conditional-include` / `variables` / `packages[-<arch>]` /
+`exclude-packages[-<arch>]` / `remove-from-packages` / `add-files` /
+`postprocess` / `recommends` and friends. The manifests are vendored under
+`manifests/`.
 
 Usage:
+    bootc-base-imagectl resolve MANIFEST
     bootc-base-imagectl build-rootfs MANIFEST TARGET [--repos-from DIR] [--no-initramfs]
 
-The MANIFEST is JSON (see manifest.json). TARGET must not exist; it is
-created and populated with the rootfs.
+MANIFEST is either a path or a name resolved under --manifestdir
+(`minimal`, `standard`, ...). TARGET must not exist; it is created and
+populated with the rootfs.
 """
 
 import argparse
@@ -23,9 +29,143 @@ import sqlite3
 import subprocess
 import sys
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - handled at runtime
+    sys.exit("error: PyYAML is required (dnf install python3-pyyaml)")
+
 ARCH = os.uname().machine
 BWRAP = shutil.which("bwrap")
 
+# Keys whose values accumulate across includes (order matters for postprocess).
+LIST_KEYS = ("packages", "exclude-packages", "remove-from-packages",
+             "add-files", "postprocess")
+# Keys where the last value encountered wins.
+SCALAR_KEYS = ("recommends", "documentation", "container-cmd", "metadata",
+               "edition", "rpmdb", "rpmdb-normalize", "machineid-compat",
+               "opt-usrlocal", "tmp-is-dir", "boot-location",
+               "etc-group-members", "ignore-removed-users",
+               "ignore-removed-groups", "check-passwd", "check-groups")
+
+
+# --------------------------------------------------------------------------
+# manifest resolution (treefile -> flat manifest)
+# --------------------------------------------------------------------------
+
+def eval_condition(expr, variables):
+    """Evaluate the tiny `if:` language used by conditional-include: a
+    variable compared with == or != against a literal."""
+    m = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*"?([^"\s]*)"?\s*$', expr)
+    if not m:
+        raise ValueError(f"unsupported condition: {expr!r}")
+    var, op, val = m.groups()
+    actual = str(variables.get(var, ""))
+    return (actual == val) if op == "==" else (actual != val)
+
+
+class Resolver:
+    def __init__(self):
+        self.variables = {"basearch": ARCH}
+        self.result = {}
+        self.postprocess_units = []
+
+    def resolve(self, path):
+        self._resolve_file(path)
+        result = self.result
+        # rpm-ostree runs postprocess in reverse include order, preserving the
+        # order *within* each file.
+        result["postprocess"] = [s for unit in reversed(self.postprocess_units)
+                                 for s in unit]
+        result["basearch"] = ARCH
+        result.setdefault("recommends", False)
+        result.setdefault("documentation", False)
+        return result
+
+    def _resolve_file(self, path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        base = os.path.dirname(os.path.realpath(path))
+        for k, v in (data.get("variables") or {}).items():
+            self.variables[k] = v
+        self._includes(data.get("include"), base)
+        self._conditional(data.get("conditional-include"), base)
+        self._merge(data, base)
+
+    def _includes(self, inc, base):
+        if not inc:
+            return
+        if isinstance(inc, str):
+            inc = [inc]
+        for item in inc:
+            if isinstance(item, dict):
+                self._merge(item, base)
+            else:
+                self._resolve_file(os.path.join(base, item))
+
+    def _conditional(self, conds, base):
+        for c in conds or []:
+            if not eval_condition(c["if"], self.variables):
+                continue
+            inc = c.get("include")
+            if isinstance(inc, str):
+                self._resolve_file(os.path.join(base, inc))
+            elif isinstance(inc, list):
+                self._includes(inc, base)
+            elif isinstance(inc, dict):
+                self._merge(inc, base)
+
+    def _merge(self, data, base):
+        for key in LIST_KEYS:
+            if key not in data:
+                continue
+            if key == "postprocess":
+                self.postprocess_units.append(list(data[key]))
+            elif key == "add-files":
+                dst = self.result.setdefault(key, [])
+                for src, target in data[key]:
+                    dst.append([os.path.join(base, src), target])
+            else:
+                self.result.setdefault(key, []).extend(data[key])
+        for key in ("packages", "exclude-packages"):
+            arch_key = f"{key}-{ARCH}"
+            if arch_key in data:
+                self.result.setdefault(key, []).extend(data[arch_key])
+        for key in SCALAR_KEYS:
+            if key in data:
+                self.result[key] = data[key]
+
+
+def find_manifest(name, manifestdir):
+    if os.path.isfile(name):
+        return name
+    for candidate in (name + ".yaml", name):
+        path = os.path.join(manifestdir, candidate)
+        if os.path.isfile(path):
+            return path
+    sys.exit(f"error: manifest not found: {name} (in {manifestdir})")
+
+
+def package_list(manifest):
+    items = list(manifest.get("packages") or [])
+    # allow whitespace-separated groups in one entry, like treefiles do
+    seen = {}
+    for item in items:
+        for word in str(item).split():
+            seen[word] = None
+    return list(seen)
+
+
+def exclude_list(manifest):
+    seen = {}
+    for item in manifest.get("exclude-packages") or []:
+        for word in str(item).split():
+            seen[word] = None
+    return list(seen)
+
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
 
 def require_bwrap():
     """bwrap is used to run package tooling against the target rootfs. Under
@@ -88,122 +228,90 @@ def configure_dnf(target, repos_from):
                 break
 
 
-def package_list(manifest):
-    items = (list(manifest.get("packages") or []) +
-             list(manifest.get(f"packages-{ARCH}") or []))
-    # allow whitespace-separated groups in one entry, like treefiles do
-    return [word for item in items for word in str(item).split()]
-
-
-def exclude_list(manifest):
-    items = (list(manifest.get("exclude-packages") or []) +
-             list(manifest.get(f"exclude-packages-{ARCH}") or []))
-    seen = {}
-    for item in items:
-        for word in str(item).split():
-            seen[word] = None
-    return list(seen)
-
-
 # --------------------------------------------------------------------------
-# bootc rootfs glue (what rpm-ostree did around the package install)
+# build steps
 # --------------------------------------------------------------------------
 
-def rootfs_glue(target, manifest, no_initramfs):
+def install_packages(target, manifest):
+    argv = ["dnf5", "install", "-y", f"--installroot={target}",
+            # dnf predates containers and protects the *builder's* kernel.
+            "--setopt=protect_running_kernel=False",
+            # Let the manifests own the kernel policy (see kernel-install.yaml).
+            "--setopt=installonlypkgs="]
+    if not manifest.get("recommends", False):
+        argv.append("--setopt=install_weak_deps=false")
+    if not manifest.get("documentation", False):
+        argv.append("--setopt=tsflags=nodocs")
+    for e in exclude_list(manifest):
+        argv.append(f"--exclude={e}")
+    argv += package_list(manifest)
+
+    log("Installing packages with dnf5 --installroot")
+    run(argv)
+
+
+def apply_add_files(target, manifest):
+    for src, dest in manifest.get("add-files") or []:
+        dst = os.path.join(target, dest.lstrip("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        log(f"Adding {dest}")
+        shutil.copy2(src, dst)
+
+
+def apply_remove_from_packages(target, manifest):
+    for entry in manifest.get("remove-from-packages") or []:
+        pkg, patterns = entry[0], [re.compile(p) for p in entry[1:]]
+        r = bwrap_run(target, ["/usr/bin/rpm", "-ql", pkg],
+                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        if r.returncode != 0:
+            print(f"warning: {pkg} not installed; skipping remove-from-packages")
+            continue
+        for f in r.stdout.splitlines():
+            if not any(p.match(f) for p in patterns):
+                continue
+            path = os.path.join(target, f.lstrip("/"))
+            log(f"Removing {f} (from {pkg})")
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            elif os.path.lexists(path):
+                os.remove(path)
+
+
+def run_sysusers(target):
     # System users. Prefer the target's own systemd-sysusers so its policy
     # and config are used; its output lands in the target's /etc.
     log("Running systemd-sysusers")
     if shutil.which("systemd-sysusers"):
         run(["systemd-sysusers", f"--root={target}"])
     else:
-        bwrap_run(target, ["/usr/bin/systemd-sysusers"])
+        bwrap_run(target, ["/usr/bin/systemd-sysusers"], check=True)
 
-    # Neutralize systemd-firstboot, as the base-images manifests do via
-    # `remove-from-packages`; otherwise it would run on first boot.
-    for link in ("usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service",
-                 "etc/systemd/system/sysinit.target.wants/systemd-firstboot.service"):
-        path = os.path.join(target, link)
-        if os.path.lexists(path):
+
+def stage_boot(target):
+    """Keep /boot empty and stage EFI binaries under /usr/lib/ostree-boot,
+    like rpm-ostree (boot-location: modules). A non-empty /boot makes
+    systemd's gpt-auto-generator target /efi (which no bootc image ships).
+    This runs before postprocess so bootupd sees the staged binaries."""
+    boot = os.path.join(target, "boot")
+    if not os.path.isdir(boot):
+        return
+    src_efi = os.path.join(boot, "efi")
+    if os.path.isdir(src_efi):
+        dst_efi = os.path.join(target, "usr/lib/ostree-boot/efi")
+        os.makedirs(os.path.dirname(dst_efi), exist_ok=True)
+        shutil.copytree(src_efi, dst_efi, dirs_exist_ok=True)
+    for ent in os.listdir(boot):
+        path = os.path.join(boot, ent)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
             os.remove(path)
 
-    # Apply preset enablement (the same unit links a booted system expects).
-    log("Applying systemd presets")
-    r = bwrap_run(target, ["/usr/bin/systemctl", "preset-all"])
-    if r.returncode != 0:
-        print(f"warning: systemctl preset-all failed (rc={r.returncode})")
 
-    # Runtime compatibility glue.
-    os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
-    var_tmp = os.path.join(target, "var/tmp")
-    if not os.path.isdir(var_tmp):
-        os.makedirs(var_tmp)
-        os.chmod(var_tmp, 0o1777)
-    var_run = os.path.join(target, "var/run")
-    if not os.path.lexists(var_run):
-        os.symlink("../run", var_run)
-
-    # Never persist a machine-id in the image.
-    os.makedirs(os.path.join(target, "etc"), exist_ok=True)
-    open(os.path.join(target, "etc/machine-id"), "w").close()
-
-    # bootc requires /sysroot and the ostree -> sysroot/ostree link.
-    os.makedirs(os.path.join(target, "sysroot"), exist_ok=True)
-    ostree_link = os.path.join(target, "ostree")
-    if not os.path.lexists(ostree_link):
-        os.symlink("sysroot/ostree", ostree_link)
-
-    # Enable composefs (bootc's baseimage reference content); without it the
-    # linter warns and deployments skip composefs.
-    ostree_dir = os.path.join(target, "usr/lib/ostree")
-    os.makedirs(ostree_dir, exist_ok=True)
-    prepare_root = os.path.join(ostree_dir, "prepare-root.conf")
-    if not os.path.exists(prepare_root):
-        with open(prepare_root, "w") as f:
-            f.write("[composefs]\nenabled = yes\n[sysroot]\nreadonly = true\n")
-
-    # Keep /boot empty and stage EFI binaries under /usr/lib/ostree-boot,
-    # like rpm-ostree. A non-empty /boot makes systemd's gpt-auto-generator
-    # target /efi (which no bootc image ships).
-    boot = os.path.join(target, "boot")
-    if os.path.isdir(boot):
-        src_efi = os.path.join(boot, "efi")
-        if os.path.isdir(src_efi):
-            dst_efi = os.path.join(target, "usr/lib/ostree-boot/efi")
-            os.makedirs(os.path.dirname(dst_efi), exist_ok=True)
-            shutil.copytree(src_efi, dst_efi, dirs_exist_ok=True)
-        for ent in os.listdir(boot):
-            path = os.path.join(boot, ent)
-            if os.path.isdir(path) and not os.path.islink(path):
-                shutil.rmtree(path)
-            else:
-                os.remove(path)
-
-    # Generate bootupd update metadata (used by bootc install / updates).
-    log("Generating bootloader update metadata")
-    r = bwrap_run(target, ["/usr/bin/bootupctl", "backend", "generate-update-metadata"])
-    if r.returncode != 0:
-        print(f"warning: bootupctl metadata generation failed (rc={r.returncode})")
-
-    if not no_initramfs:
-        generate_initramfs(target)
-
-    rpmdb_target_layout(target)
-
-    # No runtime/log state, no dnf state, in the image.
-    for d in ("run", "var/log"):
-        p = os.path.join(target, d)
-        env = os.listdir(p) if os.path.isdir(p) else []
-        for ent in env:
-            child = os.path.join(p, ent)
-            if os.path.isdir(child) and not os.path.islink(child):
-                shutil.rmtree(child)
-            else:
-                os.remove(child)
-    shutil.rmtree(os.path.join(target, "dnf"), ignore_errors=True)
-    shutil.rmtree(os.path.join(target, "var/lib/dnf"), ignore_errors=True)
-
-    # Make the root directory world-readable/traversable (rpm-ostree does).
-    os.chmod(target, os.stat(target).st_mode | 0o555)
+def run_postprocess(target, manifest):
+    for i, script in enumerate(manifest.get("postprocess") or []):
+        log(f"Running postprocess script {i + 1}")
+        bwrap_run(target, ["/bin/bash", "-s"], input=script, text=True, check=True)
 
 
 def generate_initramfs(target):
@@ -261,10 +369,55 @@ def rpmdb_target_layout(target):
         f.write("%_dbpath /usr/share/rpm\n")
 
 
-# --------------------------------------------------------------------------
+def finalize_rootfs(target):
+    # Runtime compatibility glue that isn't expressed in the manifests.
+    os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
+    var_tmp = os.path.join(target, "var/tmp")
+    if not os.path.isdir(var_tmp):
+        os.makedirs(var_tmp)
+        os.chmod(var_tmp, 0o1777)
+    var_run = os.path.join(target, "var/run")
+    if not os.path.lexists(var_run):
+        os.symlink("../run", var_run)
+
+    # `opt-usrlocal: root`: /opt and /usr/local are real directories.
+    for rel in ("opt", "usr/local"):
+        path = os.path.join(target, rel)
+        if os.path.islink(path):
+            os.remove(path)
+        os.makedirs(path, exist_ok=True)
+
+    # Never persist a machine-id in the image.
+    os.makedirs(os.path.join(target, "etc"), exist_ok=True)
+    open(os.path.join(target, "etc/machine-id"), "w").close()
+
+    # bootc requires /sysroot and the ostree -> sysroot/ostree link.
+    os.makedirs(os.path.join(target, "sysroot"), exist_ok=True)
+    ostree_link = os.path.join(target, "ostree")
+    if not os.path.lexists(ostree_link):
+        os.symlink("sysroot/ostree", ostree_link)
+
+    # No runtime/log state, no dnf state, in the image.
+    for d in ("run", "var/log"):
+        p = os.path.join(target, d)
+        entries = os.listdir(p) if os.path.isdir(p) else []
+        for ent in entries:
+            child = os.path.join(p, ent)
+            if os.path.isdir(child) and not os.path.islink(child):
+                shutil.rmtree(child)
+            else:
+                os.remove(child)
+    shutil.rmtree(os.path.join(target, "dnf"), ignore_errors=True)
+    shutil.rmtree(os.path.join(target, "var/lib/dnf"), ignore_errors=True)
+
+    # Make the root directory world-readable/traversable (rpm-ostree does).
+    os.chmod(target, os.stat(target).st_mode | 0o555)
+
 
 def build_rootfs(args):
-    manifest = json.load(open(args.manifest))
+    manifest_path = find_manifest(args.manifest, args.manifestdir)
+    log(f"Resolving manifest {manifest_path}")
+    manifest = Resolver().resolve(manifest_path)
     target = args.target
     if os.path.exists(target):
         shutil.rmtree(target)
@@ -272,20 +425,16 @@ def build_rootfs(args):
 
     require_bwrap()
     configure_dnf(target, args.repos_from)
-
-    argv = ["dnf5", "install", "-y", f"--installroot={target}"]
-    if not manifest.get("install-weak-deps", True):
-        argv.append("--setopt=install_weak_deps=false")
-    if manifest.get("documentation", False) is False:
-        argv.append("--setopt=tsflags=nodocs")
-    for e in exclude_list(manifest):
-        argv.append(f"--exclude={e}")
-    argv += package_list(manifest)
-
-    log("Installing packages with dnf5 --installroot")
-    run(argv)
-
-    rootfs_glue(target, manifest, args.no_initramfs)
+    install_packages(target, manifest)
+    apply_add_files(target, manifest)
+    apply_remove_from_packages(target, manifest)
+    run_sysusers(target)
+    stage_boot(target)
+    run_postprocess(target, manifest)
+    finalize_rootfs(target)
+    if not args.no_initramfs:
+        generate_initramfs(target)
+    rpmdb_target_layout(target)
 
     log("Validating with bootc container lint")
     run(["bootc", "container", "lint", f"--rootfs={target}"])
@@ -293,18 +442,32 @@ def build_rootfs(args):
     log("Done")
 
 
+def resolve_cmd(args):
+    manifest_path = find_manifest(args.manifest, args.manifestdir)
+    print(json.dumps(Resolver().resolve(manifest_path), indent=4, sort_keys=True))
+
+
 def main():
     parser = argparse.ArgumentParser(prog="bootc-base-imagectl", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+                                     formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     allow_abbrev=False)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    r = sub.add_parser("resolve", help="print the fully resolved manifest as JSON")
+    r.add_argument("manifest", help="manifest name or path")
+    r.add_argument("--manifestdir", default="/usr/share/bootc-base-imagectl/manifests")
+    r.set_defaults(func=resolve_cmd)
+
     p = sub.add_parser("build-rootfs", help="compose a rootfs into TARGET")
-    p.add_argument("manifest", help="JSON manifest (see manifest.json)")
+    p.add_argument("manifest", help="manifest name or path")
     p.add_argument("target", help="target directory (must not exist)")
+    p.add_argument("--manifestdir", default="/usr/share/bootc-base-imagectl/manifests")
     p.add_argument("--repos-from", default="/",
                    help="source root providing dnf repos/config (default: /)")
     p.add_argument("--no-initramfs", action="store_true",
                    help="skip dracut initramfs generation")
     p.set_defaults(func=build_rootfs)
+
     args = parser.parse_args()
     args.func(args)
 

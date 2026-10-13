@@ -1,0 +1,20 @@
+# Configuration for the initramfs
+postprocess:
+  - |
+    #!/usr/bin/env bash
+    set -xeuo pipefail
+    mkdir -p /usr/lib/dracut/dracut.conf.d
+    cat > /usr/lib/dracut/dracut.conf.d/30-bootc-standard.conf << 'EOF'
+    add_dracutmodules+=" lvm crypt fips "
+    EOF
+    # Clevis in initramfs for LUKS auto-unlock.
+    # clevis-pin-tpm2 is only on x86_64/aarch64 (TPM2 hardware arches).
+    if test -x /usr/bin/clevis-pin-tpm2; then
+      cat > /usr/lib/dracut/dracut.conf.d/50-bootc-clevis.conf << 'EOF'
+      add_dracutmodules+=" clevis clevis-pin-tpm2 "
+    EOF
+    else
+      cat > /usr/lib/dracut/dracut.conf.d/50-bootc-clevis.conf << 'EOF'
+      add_dracutmodules+=" clevis "
+    EOF
+    fi

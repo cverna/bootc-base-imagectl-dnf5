@@ -1,0 +1,53 @@
+#!/bin/bash
+# Check that the vendored base-images manifests resolve to the expected tiers.
+# Needs python3 + PyYAML (no container required).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+ctl="$root/bootc-base-imagectl"
+
+resolve() {
+    "$ctl" resolve "$1" --manifestdir "$root/manifests"
+}
+
+python3 - "$root" <<'PY'
+import json, subprocess, sys
+root = sys.argv[1]
+
+def resolve(name):
+    out = subprocess.check_output(
+        [f"{root}/bootc-base-imagectl", "resolve", name, "--manifestdir", f"{root}/manifests"])
+    return json.loads(out)
+
+def pkgs(m):
+    return {w for item in m["packages"] for w in str(item).split()}
+
+minimal = resolve("minimal")
+standard = resolve("standard")
+
+# minimal: bootc, systemd, kernel, dnf, but no sshd / NetworkManager.
+assert {"bootc", "systemd", "kernel"} <= pkgs(minimal), "minimal missing core packages"
+assert "/usr/bin/dnf" in pkgs(minimal), "minimal missing dnf"
+assert "openssh-server" not in pkgs(minimal), "minimal should not ship sshd"
+assert "NetworkManager" not in pkgs(minimal), "minimal should not ship NetworkManager"
+
+# standard: a superset that is reachable after a reinstall.
+assert {"openssh-server", "NetworkManager", "podman", "sudo"} <= pkgs(standard), \
+    "standard missing expected packages"
+assert pkgs(minimal) <= pkgs(standard), "standard should be a superset of minimal"
+
+# Shared expectations from the treefile format.
+for m in (minimal, standard):
+    assert "kernel-debug" in m["exclude-packages"], "kernel-debug not excluded"
+    assert len(m["postprocess"]) >= 10, "postprocess scripts missing"
+    assert m["remove-from-packages"], "remove-from-packages missing"
+    assert m["container-cmd"] == ["/sbin/init"], "container-cmd not resolved"
+    assert m["recommends"] == (m is standard), "recommends not resolved"
+
+# add-files only come from the standard include tree.
+assert len(standard["add-files"]) == 2, "standard add-files not resolved"
+assert not minimal.get("add-files"), "minimal should have no add-files"
+
+print("manifest resolution ok: minimal=%d standard=%d packages"
+      % (len(pkgs(minimal)), len(pkgs(standard))))
+PY

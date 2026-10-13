@@ -1,0 +1,14 @@
+# Postprocessing relating to systemd presets on the system.
+#
+# Note this relies on the `systemctl preset-all` run from
+# minimal/systemd-presets.yaml running after this postprocess.
+postprocess:
+  # Enable automatic updates by default
+  - |
+    #!/bin/bash
+    set -xeuo pipefail
+    # Enable automatic updates by default
+    cat <<EOF > usr/lib/systemd/system-preset/86-bootc-standard.preset
+    # Enable automatic updates by default
+    enable bootc-fetch-apply-updates.timer
+    EOF

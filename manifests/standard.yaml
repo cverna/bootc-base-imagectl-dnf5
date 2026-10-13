@@ -1,0 +1,11 @@
+include:
+  - fedora-includes/generic.yaml
+  - standard/manifest.yaml
+
+packages:
+  # Make Ansible "package" builtin work by default
+  - python3-libdnf5
+  # Content-based container layer splitting for rechunking
+  # Note we should be able to move this back to the base standard/manifest.yaml
+  # once chunkah is in CentOS Stream and RHEL.
+  - chunkah
