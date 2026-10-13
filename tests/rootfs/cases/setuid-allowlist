@@ -4,6 +4,10 @@ set -xeuo pipefail
 expected="$(cat <<'EOT' | sort
 /usr/bin/chfn
 /usr/bin/chsh
+/usr/bin/chage
+/usr/bin/gpasswd
+/usr/bin/newgrp
+/usr/bin/passwd
 /usr/bin/grub2-set-bootflag
 /usr/bin/mount
 /usr/bin/pam_timestamp_check

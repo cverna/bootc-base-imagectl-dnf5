@@ -35,6 +35,10 @@ This is intentionally **dnf5-only**: there is no rpm-ostree code path.
    - runtime/log/dnf state removed;
 4. runs `bootc container lint`.
 
+- `openssh-server` (with its `shadow-utils` dependency) is included so the
+  image is usable and so tmt/Testing Farm can reconnect after reinstalling a
+  VM from it; drop it if you want a truly minimal image.
+
 Users are kept inline in `/etc` (`passwd: files systemd`), following the
 pending "Switch away from nss-altfiles" Change
 (<https://github.com/coreos/fedora-coreos-tracker/issues/1599>) rather than
