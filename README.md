@@ -154,8 +154,15 @@ the resulting deployment: ESP + root partitions,
 `/usr/lib/modules/*/initramfs.img`, the BLS entry's `initrd`, the rpmdb
 layout, and (when the host enforces SELinux) the on-disk file contexts.
 
-CI runs `lint`, the rootfs tests, and the disk test for both tiers on each
-architecture.
+`just luks-test` (needs root) installs the image onto a LUKS-encrypted root
+with `bootc install to-filesystem` — the way bootc recommends for encrypted
+installs — and validates it: a LUKS root partition, the ostree deployment
+inside it, and a BLS entry pointing at the LUKS root with the unlock karg.
+The rootfs case `luks` checks the standard tier ships the tooling
+(`cryptsetup`, `clevis`, `clevis-pin-tpm2`) and a crypt-capable initramfs.
+
+CI runs `lint`, the rootfs tests, and the disk tests (plus the LUKS install
+test for the standard tier) on each architecture.
 
 [fedora-coreos-config]: https://github.com/coreos/fedora-coreos-config/tree/main/tests/kola
 

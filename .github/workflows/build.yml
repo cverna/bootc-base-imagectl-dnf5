@@ -89,6 +89,14 @@ jobs:
           set -euxo pipefail
           sudo tests/disk/run "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}"
 
+      # LUKS support is a property of the standard tier (minimal deliberately
+      # has no crypt/clevis modules).
+      - name: LUKS install test
+        if: matrix.tier == 'standard'
+        run: |
+          set -euxo pipefail
+          sudo tests/disk/luks "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}"
+
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
         run: |

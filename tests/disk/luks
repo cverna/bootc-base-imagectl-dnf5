@@ -1,0 +1,40 @@
+#!/bin/bash
+# Smoke test: install the image onto a LUKS-encrypted root with
+# `bootc install to-filesystem` (bootc's recommended way to do encrypted
+# installs) and validate the result. Needs root (losetup/podman).
+#
+# The loop device is created here on the host (not inside the container), so
+# its backing file is stable across the container's lifetime; the container
+# does the filesystem/LUKS/install work (it ships the required tools).
+set -euo pipefail
+img=${1:?usage: run <image-ref>}
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d -p /var/tmp)
+loop=""
+cleanup() {
+    set +e
+    dmsetup remove -f cryptroot 2>/dev/null
+    [ -n "$loop" ] && losetup -d "$loop" 2>/dev/null
+    rm -rf "$work"
+}
+trap cleanup EXIT
+
+truncate -s 8G "$work/disk.raw"
+loop=$(losetup -P --find --show "$work/disk.raw")
+echo "installing to $loop"
+
+sfdisk "$loop" <<'EOF'
+label: gpt
+size=512M, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="ESP"
+size=1G,   type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="boot"
+           type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"
+EOF
+partx -u "$loop" || true
+sleep 2
+lsblk -f "$loop"
+
+podman run --rm --privileged --pid=host --security-opt label=disable \
+  -v /dev:/dev -v /var/lib/containers/storage:/var/lib/containers/storage \
+  -v "$here/luks-setup.sh":/luks-setup.sh:ro \
+  -e LOOP="$loop" \
+  "$img" stdbuf -oL -eL bash /luks-setup.sh "$img"

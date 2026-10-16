@@ -3,7 +3,7 @@
 # and validate the resulting deployment. Needs root (losetup/mount/podman).
 set -euo pipefail
 img=${1:?usage: run <image-ref>}
-work=$(mktemp -d)
+work=$(mktemp -d -p /var/tmp)
 loop=""
 mnt="$work/mnt"
 install_log="$work/install.log"

@@ -62,6 +62,17 @@ disk-test:
     rm -f /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-test.oci.tar
     sudo tests/disk/run {{tag}}
 
+# Install to a LUKS-encrypted root with `bootc install to-filesystem` and
+# validate the deployment (needs root).
+[group('disk')]
+luks-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{builder}} save --format=oci-archive -o /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-luks.oci.tar {{tag}}
+    sudo {{builder}} load -i /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-luks.oci.tar
+    rm -f /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-luks.oci.tar
+    sudo tests/disk/luks {{tag}}
+
 # Prove the image installs to a disk and produce raw + qcow2 artifacts.
 # Needs root (block device access) and a free loop device.
 [group('disk')]
