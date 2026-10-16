@@ -1,6 +1,8 @@
 #!/bin/bash
-set -xeuo pipefail
-# Directories and glue we expect to exist
+set -euo pipefail
+# The committed /var is minimal (like the rpm-ostree images); package /var
+# content is recreated at boot by tmpfiles.d.
 test -d var/tmp
+test "$(stat -c '%a' var/tmp)" = "1777"
 test -d var/lib/rpm-state
 test "$(readlink var/run)" = "../run"

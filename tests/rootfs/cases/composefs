@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+# The image declares the composefs backend (like the rpm-ostree images) and
+# ships what the initramfs needs to mount it.
+conf=usr/lib/ostree/prepare-root.conf
+test -f "$conf"
+grep -q '^\[composefs\]$' "$conf"
+grep -q '^enabled = yes$' "$conf"
+rpm -q composefs >/dev/null
+kver=$(ls usr/lib/modules)
+lsinitrd "usr/lib/modules/$kver/initramfs.img" > /tmp/composefs-initramfs.list
+grep -q 'libcomposefs' /tmp/composefs-initramfs.list
+grep -q 'erofs' /tmp/composefs-initramfs.list

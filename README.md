@@ -51,8 +51,11 @@ it is reachable after a reinstall. `latest` tracks `standard`.
    config, systemd presets, tmpfiles, and so on;
 8. finalizes the rootfs: the writable top-level paths become symlinks into
    `/var` (`/home`, `/mnt`, `/srv`, `/root`) and `/run/media` (`/media`), like
-   the rpm-ostree images; plus `/var` compatibility, empty `/etc/machine-id`,
-   `/sysroot`, `ostree -> sysroot/ostree`, and runtime state removed;
+   the rpm-ostree images, and `/var` is reset to the minimal set (package
+   `/var` content is recreated at boot by tmpfiles.d, declared in
+   `/usr/lib/tmpfiles.d/bootc-base-imagectl.conf`); plus empty
+   `/etc/machine-id`, `/sysroot`, `ostree -> sysroot/ostree`, and runtime
+   state removed;
 9. generates the initramfs with `dracut`, relocates the rpmdb to
    `/usr/share/rpm` with the compat symlinks and `%_dbpath` macro;
 10. runs `bootc container lint`.
@@ -111,11 +114,9 @@ Not yet handled (deliberately out of scope for the PoC):
 
 - `check-passwd`/`check-groups` enforcement and the nss-altfiles passwd split
   (see above);
-- the rpm-ostree `/var` model: it builds the committed root from a minimal
-  tree (moving only `/usr`, `/boot`, `/var`) and rewrites package `/var`
-  content as tmpfiles.d entries, so its `/var` has ~5 entries. We compose in
-  place, leaving package `/var` content behind (the `var-tmpfiles` lint
-  warning) and not running the manifests' `finalize.d` scripts;
+- the manifests' `finalize.d` scripts: we reproduce the outcome of
+  `minimal/finalize.d/01-var.sh` in `reset_var` but do not run the scripts
+  themselves;
 - byte-reproducible rpmdb (`INSTALLTIME`/`INSTALLTID` normalization);
 - SELinux policy recompilation (contexts are applied at deployment);
 - cross-architecture and cross-version builds, chunked/layered output
@@ -142,10 +143,12 @@ lets tier-specific cases (e.g. the `setuid-allowlist`) assert the right set:
 - `fedora-only`, `root-mode`, `etc-group`, `users-groups`, `no-iptables-legacy`
 - account databases: `etc-permissions`, `gshadow` (parser regression)
 - rpmdb: `rpmdb`, `rpmdb-sqlite`, `rpmdb-layout`
-- boot/ostree: `initramfs`, `boot-empty`, `bootupd`, `ostree-layout`
-- system: `systemd-firstboot`, `var`, `yum-repo-dir`, `check-symlink`,
-  `nsswitch-inline`
+- boot/ostree: `initramfs`, `boot-empty`, `bootupd`, `ostree-layout`,
+  `composefs`
+- system: `systemd-firstboot`, `var`, `var-links`, `yum-repo-dir`,
+  `check-symlink`, `nsswitch-inline`
 - security: `setuid-allowlist`, `file-permissions`
+- encryption: `luks` (the standard tier ships the LUKS tooling)
 
 `just disk-test` (needs root) installs the image to a loop device with
 `bootc install to-disk --generic-image` (installs all bootloader types
@@ -205,6 +208,7 @@ unmounted:
 - `initramfs` - kernel/initramfs bootable (BLS entry has `initrd`)
 - `rpmdb` - rpmdb at the ostree location, readable by rpm
 - `dnf` - package management works
+- `composefs` - the booted deployment uses the composefs backend
 - `switch-rollback` - upgrade with `bootc switch`, downgrade with
   `bootc rollback`
 

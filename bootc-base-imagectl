@@ -369,24 +369,39 @@ def rpmdb_target_layout(target):
         f.write("%_dbpath /usr/share/rpm\n")
 
 
+# Recreated at boot by systemd-tmpfiles (mirrors rpm-ostree's
+# rpm-ostree-0-integration.conf). The committed /var is minimal (see
+# reset_var), so the dirs behind the writable top-level paths, and the
+# /var/lib compat symlinks, are declared here instead.
+TMPFILES = """\
+d /var/home 0755 root root -
+d /var/srv 0755 root root -
+d /var/roothome 0700 root root -
+d /var/roothome/.ssh 0700 root root -
+d /var/mnt 0755 root root -
+d /run/media 0755 root root -
+L /var/lib/rpm - - - - ../../usr/share/rpm
+L /var/lib/selinux - - - - ../../etc/selinux
+Z /var/lib/selinux - - - -
+d /usr/local/bin 0755 root root -
+d /usr/local/etc 0755 root root -
+d /usr/local/games 0755 root root -
+d /usr/local/include 0755 root root -
+d /usr/local/lib 0755 root root -
+d /usr/local/sbin 0755 root root -
+d /usr/local/share 0755 root root -
+d /usr/local/src 0755 root root -
+"""
+
+
 def setup_var_links(target):
     """Point the writable top-level paths at /var (and /run/media), like the
     rpm-ostree images: the image root is read-only, so /home, /mnt, /srv and
     root's home must live on writable storage. bootc's
     `--root-ssh-authorized-keys` resolves the /root symlink to decide where to
     write the injected key, so without it the key lands in /root/.ssh
-    (unwritable at boot) and sshd never sees it."""
-    dirs = {
-        "var/home": 0o755,
-        "var/mnt": 0o755,
-        "var/srv": 0o755,
-        "var/roothome": 0o700,
-        "var/roothome/.ssh": 0o700,
-    }
-    for rel, mode in dirs.items():
-        path = os.path.join(target, rel)
-        os.makedirs(path, exist_ok=True)
-        os.chmod(path, mode)
+    (unwritable at boot) and sshd never sees it. The backing dirs are declared
+    in TMPFILES (the committed /var is minimal)."""
     links = {
         "home": "var/home",
         "mnt": "var/mnt",
@@ -401,24 +416,34 @@ def setup_var_links(target):
         elif os.path.isdir(path):
             shutil.rmtree(path)
         os.symlink(dest, path)
-    # /run is a tmpfs at boot, so /media's target has to be declared.
     tmpfiles_dir = os.path.join(target, "usr/lib/tmpfiles.d")
     os.makedirs(tmpfiles_dir, exist_ok=True)
     with open(os.path.join(tmpfiles_dir, "bootc-base-imagectl.conf"), "w") as f:
-        f.write("d /run/media 0755 root root -\n")
+        f.write(TMPFILES)
+
+
+def reset_var(target):
+    """Match the rpm-ostree images: the committed /var is minimal and package
+    /var content is (re)created at boot by tmpfiles.d, rather than baked into
+    the image (which is what the bootc `var-tmpfiles` lint check flags). Keep
+    only what base-images' minimal/finalize.d/01-var.sh creates."""
+    var = os.path.join(target, "var")
+    for ent in os.listdir(var):
+        path = os.path.join(var, ent)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    os.makedirs(os.path.join(var, "lib/rpm-state"), exist_ok=True)
+    os.makedirs(os.path.join(var, "tmp"), exist_ok=True)
+    os.chmod(os.path.join(var, "tmp"), 0o1777)
+    os.symlink("../run", os.path.join(var, "run"))
 
 
 def finalize_rootfs(target):
     # Runtime compatibility glue that isn't expressed in the manifests.
     setup_var_links(target)
-    os.makedirs(os.path.join(target, "var/lib/rpm-state"), exist_ok=True)
-    var_tmp = os.path.join(target, "var/tmp")
-    if not os.path.isdir(var_tmp):
-        os.makedirs(var_tmp)
-        os.chmod(var_tmp, 0o1777)
-    var_run = os.path.join(target, "var/run")
-    if not os.path.lexists(var_run):
-        os.symlink("../run", var_run)
+    reset_var(target)
 
     # `opt-usrlocal: root`: /opt and /usr/local are real directories.
     for rel in ("opt", "usr/local"):
