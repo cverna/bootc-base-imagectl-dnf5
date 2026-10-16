@@ -11,9 +11,13 @@
 #     /var/ARTIFACTS would be lost. Content in /var in the image is unpacked
 #     into the new system's /var, so we bake the workdir in (like bootc's
 #     hack/Containerfile.packit). The build context must contain ARTIFACTS.
+#   - tmtbin: tmt's helper commands (tmt-reboot, ...) that tmt installs into
+#     /usr/local/bin on the guest; a reinstall replaces them, so we bake them
+#     in too (needed by tests that reboot, e.g. switch-rollback).
 ARG BASE=ghcr.io/cverna/bootc-base-imagectl-dnf5:standard
 FROM ${BASE}
 COPY ARTIFACTS /var/ARTIFACTS
+COPY tmtbin /usr/local/bin/
 RUN dnf -y install rsync audit cloud-init \
  && dnf -y clean all \
  && rm -rf /var/cache/dnf \

@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+# The standard tier ships the LUKS tooling and a crypt-capable initramfs; the
+# minimal tier deliberately does not (it matches base-images, which only adds
+# the crypt/clevis modules for the larger tiers).
+case "${TIER:-minimal}" in
+  minimal)
+    echo "minimal tier: LUKS support is not expected"
+    ;;
+  standard)
+    for p in cryptsetup clevis clevis-pin-tpm2 tpm2-tools; do
+      rpm -q "$p" >/dev/null
+    done
+    kver=$(ls /usr/lib/modules)
+    lsinitrd "/usr/lib/modules/$kver/initramfs.img" > /tmp/luks-initramfs.list
+    # The initramfs must be able to unlock a LUKS root.
+    grep -q 'clevis-pin-tpm2' /tmp/luks-initramfs.list
+    grep -q 'systemd-cryptsetup' /tmp/luks-initramfs.list
+    grep -q 'clevis-luks-askpass' /tmp/luks-initramfs.list
+    ;;
+  *)
+    echo "unknown TIER=${TIER}" >&2
+    exit 1
+    ;;
+esac

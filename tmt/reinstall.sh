@@ -36,6 +36,15 @@ builddir=$(mktemp -d)
 trap 'rm -rf "$builddir"' EXIT
 cp "$tree/test-images/tmt/Containerfile" "$builddir/Containerfile"
 cp -a /var/ARTIFACTS "$builddir/ARTIFACTS"
+# tmt's helper commands (tmt-reboot, tmt-report-result, ...) live on the guest
+# in /usr/local/bin (or /var/lib/tmt/scripts); a reinstall replaces the
+# filesystem, so carry them into the test image.
+mkdir -p "$builddir/tmtbin"
+if [ -d /var/lib/tmt/scripts ]; then
+    cp -a /var/lib/tmt/scripts/. "$builddir/tmtbin/"
+elif [ -d /usr/local/bin ]; then
+    cp -a /usr/local/bin/. "$builddir/tmtbin/"
+fi
 podman build -t "$testimg" --build-arg BASE="$img" \
     -f "$builddir/Containerfile" "$builddir"
 expect "$here/reinstall.exp" "containers-storage:$testimg"
