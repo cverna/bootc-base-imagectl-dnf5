@@ -4,6 +4,8 @@
 # test harness needs on the guest:
 #   - rsync + audit: tmt pushes the test workdir with rsync and runs an AVC
 #     check (mirrors bootc's hack/packages.txt).
+#   - cloud-init: bring the guest up like a cloud image (root login, growpart),
+#     as bootc's test image does.
 #   - ARTIFACTS: a reinstall replaces /var, and the guest has /var on its own
 #     subvolume which bootc leaves unmounted, so tmt's workdir under
 #     /var/ARTIFACTS would be lost. Content in /var in the image is unpacked
@@ -12,7 +14,19 @@
 ARG BASE=ghcr.io/cverna/bootc-base-imagectl-dnf5:standard
 FROM ${BASE}
 COPY ARTIFACTS /var/ARTIFACTS
-RUN dnf -y install rsync audit \
+RUN dnf -y install rsync audit cloud-init \
  && dnf -y clean all \
- && rm -rf /var/cache/dnf
+ && rm -rf /var/cache/dnf \
+ && mkdir -p /etc/cloud/cloud.cfg.d \
+ && printf '%s\n' \
+      '# Enable root login for testing' \
+      'disable_root: false' \
+      '' \
+      '# In image mode the filesystem to resize is mounted at /sysroot.' \
+      'growpart:' \
+      '  mode: auto' \
+      '  devices: ["/sysroot"]' \
+      'resize_rootfs: false' \
+      > /etc/cloud/cloud.cfg.d/80-enable-root.cfg \
+ && ln -sf ../cloud-init.target /usr/lib/systemd/system/default.target.wants/cloud-init.target
 LABEL containers.bootc 1

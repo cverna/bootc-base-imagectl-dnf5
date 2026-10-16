@@ -187,9 +187,10 @@ replaces `/var`, so the tests' workdir has to be created afterwards; and
 per-commit image (`ghcr.io/...:<sha>-standard`, published by CI), so it
 always tests the commit under test rather than a floating tag. The shipped
 image stays faithful to base-images; `test-images/tmt/` derives a small
-image adding what the harness needs on the guest (`rsync`, `audit`) and
-baking tmt's workdir (`/var/ARTIFACTS`) into `/var`, because a reinstall
-replaces `/var` and the guest's `/var` subvolume is left unmounted:
+image adding what the harness needs on the guest (`rsync`, `audit`,
+`cloud-init`) and baking tmt's workdir (`/var/ARTIFACTS`) into `/var`,
+because a reinstall replaces `/var` and the guest's `/var` subvolume is left
+unmounted:
 
 - `bootc` - the booted system is running the installed image
 - `selinux` - SELinux enforcing
