@@ -97,6 +97,12 @@ jobs:
           set -euxo pipefail
           sudo tests/disk/luks "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}"
 
+      - name: Composefs backend disk test
+        if: matrix.tier == 'standard'
+        run: |
+          set -euxo pipefail
+          sudo tests/disk/run "${IMAGE}:${GITHUB_SHA::12}-${{ matrix.tier }}-${{ matrix.arch }}" composefs
+
       - name: Push arch image to GHCR
         if: github.event_name == 'push'
         run: |

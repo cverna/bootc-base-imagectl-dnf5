@@ -440,9 +440,44 @@ def reset_var(target):
     os.symlink("../run", os.path.join(var, "run"))
 
 
+def var_to_tmpfiles(target):
+    """Convert the target's /var content into tmpfiles.d entries, like
+    rpm-ostree's rpm-ostree-autovar.conf. Only directories and symlinks are
+    handled. The committed /var is minimal (see reset_var), so this is what
+    recreates the package /var content on first boot."""
+    var = os.path.join(target, "var")
+    # These are declared as symlinks by the integration tmpfiles
+    # (bootc-base-imagectl.conf), so don't also declare them as directories.
+    skip = {os.path.join(var, "lib/rpm"), os.path.join(var, "lib/selinux")}
+    lines = ["# Generated from the image's /var content (see reset_var()).\n"]
+    for dirpath, dirnames, filenames in os.walk(var):
+        if dirpath != var:
+            st = os.lstat(dirpath)
+            relp = "/" + os.path.relpath(dirpath, target)
+            lines.append(f"d {relp} {st.st_mode & 0o7777:04o} {st.st_uid} {st.st_gid} - -\n")
+        for name in list(dirnames):
+            path = os.path.join(dirpath, name)
+            if path in skip:
+                dirnames.remove(name)
+            elif os.path.islink(path):
+                dirnames.remove(name)
+                relp = "/" + os.path.relpath(path, target)
+                lines.append(f"L {relp} - - - - {os.readlink(path)}\n")
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path):
+                relp = "/" + os.path.relpath(path, target)
+                lines.append(f"L {relp} - - - - {os.readlink(path)}\n")
+    tmpfiles_dir = os.path.join(target, "usr/lib/tmpfiles.d")
+    os.makedirs(tmpfiles_dir, exist_ok=True)
+    with open(os.path.join(tmpfiles_dir, "bootc-base-imagectl-autovar.conf"), "w") as f:
+        f.writelines(lines)
+
+
 def finalize_rootfs(target):
     # Runtime compatibility glue that isn't expressed in the manifests.
     setup_var_links(target)
+    var_to_tmpfiles(target)
     reset_var(target)
 
     # `opt-usrlocal: root`: /opt and /usr/local are real directories.

@@ -164,8 +164,16 @@ inside it, and a BLS entry pointing at the LUKS root with the unlock karg.
 The rootfs case `luks` checks the standard tier ships the tooling
 (`cryptsetup`, `clevis`, `clevis-pin-tpm2`) and a crypt-capable initramfs.
 
+`just composefs-test` (needs root) installs the image with the **composefs
+backend** (`bootc install --composefs-backend`) and validates the
+composefs-native layout (`/composefs`, `/state/deploy`, no `/ostree/deploy`)
+and the `composefs=` boot argument. Our images use the ostree+composefs model
+(they ship `prepare-root.conf`), so the backend is selected explicitly — the
+newer composefs-native image detection (`/usr/lib/composefs/setup-root-conf.toml`
+with no `prepare-root.conf`) needs a newer bootc than the one in the image.
+
 CI runs `lint`, the rootfs tests, and the disk tests (plus the LUKS install
-test for the standard tier) on each architecture.
+and composefs-backend tests for the standard tier) on each architecture.
 
 [fedora-coreos-config]: https://github.com/coreos/fedora-coreos-config/tree/main/tests/kola
 
@@ -208,7 +216,9 @@ unmounted:
 - `initramfs` - kernel/initramfs bootable (BLS entry has `initrd`)
 - `rpmdb` - rpmdb at the ostree location, readable by rpm
 - `dnf` - package management works
-- `composefs` - the booted deployment uses the composefs backend
+- `composefs` - the booted deployment uses composefs (our images use the
+  ostree+composefs model, so this checks the deployment carries a composefs
+  image)
 - `switch-rollback` - upgrade with `bootc switch`, downgrade with
   `bootc rollback`
 

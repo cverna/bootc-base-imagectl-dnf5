@@ -1,12 +1,18 @@
 #!/bin/bash
 set -euo pipefail
-# The image declares the composefs backend (like the rpm-ostree images) and
-# ships what the initramfs needs to mount it.
-conf=usr/lib/ostree/prepare-root.conf
-test -f "$conf"
-grep -q '^\[composefs\]$' "$conf"
-grep -q '^enabled = yes$' "$conf"
+# The image declares the composefs backend and ships what the initramfs needs
+# to mount it. Two models:
+#   - ostree+composefs: usr/lib/ostree/prepare-root.conf enables composefs
+#   - composefs-native: usr/lib/composefs/setup-root-conf.toml is present and
+#     prepare-root.conf is absent (bootc then defaults to the composefs
+#     backend on install)
 rpm -q composefs >/dev/null
+if [ -f usr/lib/composefs/setup-root-conf.toml ]; then
+    test ! -e usr/lib/ostree/prepare-root.conf
+else
+    grep -q '^\[composefs\]$' usr/lib/ostree/prepare-root.conf
+    grep -q '^enabled = yes$' usr/lib/ostree/prepare-root.conf
+fi
 kver=$(ls usr/lib/modules)
 lsinitrd "usr/lib/modules/$kver/initramfs.img" > /tmp/composefs-initramfs.list
 grep -q 'libcomposefs' /tmp/composefs-initramfs.list

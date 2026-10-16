@@ -62,6 +62,17 @@ disk-test:
     rm -f /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-test.oci.tar
     sudo tests/disk/run {{tag}}
 
+# Install with the composefs backend (`--composefs-backend`) and validate the
+# composefs-native layout (needs root).
+[group('disk')]
+composefs-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{builder}} save --format=oci-archive -o /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-cfs.oci.tar {{tag}}
+    sudo {{builder}} load -i /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-cfs.oci.tar
+    rm -f /var/tmp/{{replace(image, "/", "-")}}-{{tier}}-cfs.oci.tar
+    sudo tests/disk/run {{tag}} composefs
+
 # Install to a LUKS-encrypted root with `bootc install to-filesystem` and
 # validate the deployment (needs root).
 [group('disk')]
