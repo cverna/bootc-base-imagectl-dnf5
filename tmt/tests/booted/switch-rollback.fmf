@@ -1,0 +1,4 @@
+summary: Upgrade and downgrade with switch and rollback
+test: ./switch-rollback.sh
+framework: shell
+duration: 40m

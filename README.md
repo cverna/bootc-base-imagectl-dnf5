@@ -196,8 +196,10 @@ unmounted:
 - `selinux` - SELinux enforcing
 - `systemd` - no failed units
 - `initramfs` - kernel/initramfs bootable (BLS entry has `initrd`)
-- `rpmdb` - rpmdb layout, no transient sqlite sidecars
+- `rpmdb` - rpmdb at the ostree location, readable by rpm
 - `dnf` - package management works
+- `switch-rollback` - upgrade with `bootc switch`, downgrade with
+  `bootc rollback`
 
 ```bash
 tmt run -a plan -n booted
